@@ -1,0 +1,382 @@
+<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Part Builder</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+*{box-sizing:border-box}
+body{margin:0;height:100vh;display:flex;flex-direction:column;background:#2b2b2b;color:#e6e6e6;font:12px system-ui,sans-serif;overflow:hidden}
+#top{display:flex;gap:6px;align-items:center;padding:6px;background:#1f1f1f;border-bottom:1px solid #444;flex-wrap:wrap}
+#top .g{display:flex;gap:3px;padding-right:8px;border-right:1px solid #444;align-items:center}
+button{background:#3a3a3a;color:#eee;border:1px solid #555;border-radius:3px;padding:5px 9px;cursor:pointer;font:inherit}
+button:hover{background:#4a4a4a}button.on{background:#0d99ff;border-color:#0d99ff}
+input,select{background:#222;color:#eee;border:1px solid #555;border-radius:3px;padding:3px;font:inherit;min-width:0}
+#main{flex:1;display:flex;min-height:0}
+#view{flex:1;position:relative;min-width:0}
+#view canvas{display:block;width:100%;height:100%}
+#box{position:absolute;border:1px solid #0d99ff;background:#0d99ff33;display:none;pointer-events:none}
+#ai{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:10}
+#ai .card{background:#2f2f2f;border:1px solid #555;border-radius:6px;padding:14px;width:min(640px,94vw);max-height:92vh;overflow:auto;display:flex;flex-direction:column;gap:8px}
+#ai h3{margin:0}#ai ol{margin:0;padding-left:18px;color:#bbb;line-height:1.5}
+#ai textarea{height:190px;background:#1f1f1f;color:#eee;border:1px solid #555;border-radius:3px;padding:6px;font:12px monospace;resize:vertical}
+#ai .bar{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+#aiLog{margin:0;white-space:pre-wrap;color:#9fd;max-height:120px;overflow:auto}
+#cmd{position:absolute;top:8px;left:8px;width:min(540px,70%);background:#000b;color:#eee;border:1px solid #555;border-radius:3px;padding:5px 8px;font:12px monospace}
+#hint{position:absolute;left:8px;bottom:6px;background:#0008;padding:3px 7px;border-radius:3px;pointer-events:none}
+#side{width:270px;background:#333;border-left:1px solid #444;display:flex;flex-direction:column}
+#side h4{margin:0;padding:6px 8px;background:#262626;border-bottom:1px solid #444}
+#ex{flex:1;overflow:auto;margin:0;padding:0;list-style:none;min-height:80px}
+#ex li{padding:3px 10px;cursor:pointer}#ex li:hover{background:#444}#ex li.sel{background:#0d99ff}
+#props{padding:8px;display:flex;flex-direction:column;gap:5px}
+.row{display:flex;gap:3px;align-items:center}.row label{width:70px;flex:none;color:#aaa}.row input,.row select{flex:1}
+input[type=color]{padding:0;height:22px}
+</style></head><body>
+<div id="top">
+ <div class="g" id="tools"></div>
+ <div class="g" id="ins"></div>
+ <div class="g" id="act"></div>
+ <div class="g">Move snap <input id="ms" type="number" value="1" step="0.25" style="width:48px"> Rot snap <input id="rs" type="number" value="15" style="width:48px"></div>
+ <div class="g" style="border:0"><button id="exp">Export FBX</button></div>
+</div>
+<div id="main">
+ <div id="view"><div id="box"></div><input id="cmd" placeholder="Command (Enter to run), e.g.  block pos=0,3,0 size=4,1,2 color=#ff0000  ·  set Block1 neg=1  ·  clear" spellcheck="false"><div id="hint">RMB drag: look · WASD/QE: fly (Shift = slow) · MMB: pan · Wheel: zoom · F: focus · Drag a part to move it (Alt+drag = up/down) · Ctrl/Shift-click or drag a box: multi-select · Ctrl+C/X/V · N: negate (cut hole) · Ctrl+Z/Y: undo/redo · 1-4: tools · R/T: rotate 90° · Ctrl+D: duplicate · Del: delete</div></div>
+ <div id="side"><h4>Explorer</h4><ul id="ex"></ul><h4>Properties</h4><div id="props"></div></div>
+</div>
+<div id="ai"><div class="card"><h3>Build with AI</h3>
+<ol><li>Click <b>Copy AI prompt</b>, paste it into any AI chat, then describe what you want built after it.</li>
+<li>Paste the AI's reply below and press <b>Run</b>. Use <b>Copy current scene</b> to let the AI edit what you already have.</li></ol>
+<div class="bar"><button id="aiPrompt" class="on">Copy AI prompt</button><button id="aiScene">Copy current scene</button><button id="aiClose" style="margin-left:auto">Close</button></div>
+<textarea id="aiIn" spellcheck="false" placeholder="Paste the AI's commands here (or a JSON list of parts)..."></textarea>
+<div class="bar"><label><input type="radio" name="aim" value="add" checked> Add to scene</label><label><input type="radio" name="aim" value="replace"> Replace scene</label><button id="aiRun" class="on">Run</button></div>
+<pre id="aiLog"></pre></div></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+const T=THREE,$=id=>document.getElementById(id),D=Math.PI/180;
+const MATS={Plastic:{},SmoothPlastic:{r:.3},Neon:{em:1},Glass:{r:.05},Metal:{m:.7,r:.35}};
+const TYPES={Block:[4,1,2],Sphere:[4,4,4],Wedge:[4,1,2],CornerWedge:[2,1,2],Cylinder:[2,2,2]};
+const AX=[new T.Vector3(1,0,0),new T.Vector3(0,1,0),new T.Vector3(0,0,1)],COL=[0xff3b3b,0x3bd35a,0x3b8bff];
+
+// ---------- scene ----------
+const view=$('view'),renderer=new T.WebGLRenderer({antialias:true});view.appendChild(renderer.domElement);
+const cv=renderer.domElement,scene=new T.Scene();scene.background=new T.Color(0x8fb4e3);
+const cam=new T.PerspectiveCamera(70,1,.1,3000);cam.rotation.order='YXZ';cam.position.set(25,18,30);
+let yaw=.69,pitch=-.4;
+scene.add(new T.HemisphereLight(0xffffff,0x667788,.8));
+const sun=new T.DirectionalLight(0xffffff,.9);sun.position.set(50,100,30);scene.add(sun);
+const base=new T.Mesh(new T.BoxGeometry(512,1,512),new T.MeshStandardMaterial({color:0x6a8f5a}));base.position.y=-.5;scene.add(base);
+const grid=new T.GridHelper(512,128,0,0);grid.material.transparent=true;grid.material.opacity=.15;grid.position.y=.02;scene.add(grid);
+function resize(){renderer.setSize(view.clientWidth,view.clientHeight);cam.aspect=view.clientWidth/view.clientHeight;cam.updateProjectionMatrix()}
+addEventListener('resize',resize);
+
+// ---------- geometry (shared by viewer + exporter) ----------
+const V=(x,y,z)=>new T.Vector3(x,y,z),baseCache={};
+function poly(verts,faces){const P=[],N=[],c=V(0,0,0);verts.forEach(v=>c.add(v));c.multiplyScalar(1/verts.length);
+ for(const f of faces){let v=f.map(i=>verts[i]);const n=new T.Vector3().subVectors(v[1],v[0]).cross(new T.Vector3().subVectors(v[2],v[0])).normalize();
+  const fc=V(0,0,0);v.forEach(a=>fc.add(a));fc.multiplyScalar(1/v.length);
+  if(n.dot(fc.sub(c))<0){n.negate();v=v.slice().reverse()}
+  for(let k=1;k<v.length-1;k++)[v[0],v[k],v[k+1]].forEach(a=>{P.push(a.x,a.y,a.z);N.push(n.x,n.y,n.z)})}
+ return{pos:P,nor:N}}
+function baseGeo(t){if(baseCache[t])return baseCache[t];let r;
+ if(t=='Wedge')r=poly([V(-.5,-.5,-.5),V(.5,-.5,-.5),V(.5,-.5,.5),V(-.5,-.5,.5),V(-.5,.5,.5),V(.5,.5,.5)],[[0,1,2,3],[3,2,5,4],[0,1,5,4],[0,3,4],[1,2,5]]);
+ else if(t=='CornerWedge')r=poly([V(-.5,-.5,-.5),V(.5,-.5,-.5),V(.5,-.5,.5),V(-.5,-.5,.5),V(-.5,.5,.5)],[[0,1,2,3],[0,3,4],[3,2,4],[0,1,4],[1,2,4]]);
+ else{const g=(t=='Sphere'?new T.SphereGeometry(.5,24,16):t=='Cylinder'?new T.CylinderGeometry(.5,.5,1,32).rotateZ(Math.PI/2):new T.BoxGeometry(1,1,1)).toNonIndexed();
+  r={pos:Array.from(g.attributes.position.array),nor:Array.from(g.attributes.normal.array)}}
+ return baseCache[t]=r}
+function partData(p){const b=baseGeo(p.type),s=p.size,n=b.pos.length/3,pos=new Float32Array(n*3),nor=new Float32Array(n*3),uv=new Float32Array(n*2),t=new T.Vector3();
+ for(let i=0;i<n;i++){for(let k=0;k<3;k++){pos[i*3+k]=b.pos[i*3+k]*s[k];t.setComponent(k,b.nor[i*3+k]/s[k])}
+  t.normalize();nor.set([t.x,t.y,t.z],i*3);
+  const ax=Math.abs(t.x)>Math.abs(t.y)&&Math.abs(t.x)>Math.abs(t.z)?0:Math.abs(t.y)>Math.abs(t.z)?1:2;
+  const[u,v]=ax==0?[2,1]:ax==1?[0,2]:[0,1];uv[i*2]=pos[i*3+u]/4;uv[i*2+1]=pos[i*3+v]/4}
+ return{pos,nor,uv}}
+function geo(p){const d=partData(p),g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(d.pos,3));g.setAttribute('normal',new T.BufferAttribute(d.nor,3));g.setAttribute('uv',new T.BufferAttribute(d.uv,2));return g}
+
+// ---------- CSG (subtract only, for cutting holes) ----------
+class Vx{constructor(p,n){this.p=p;this.n=n}clone(){return new Vx(this.p.clone(),this.n.clone())}lerp(o,t){return new Vx(this.p.clone().lerp(o.p,t),this.n.clone().lerp(o.n,t).normalize())}}
+class Pl{constructor(n,w){this.n=n;this.w=w}clone(){return new Pl(this.n.clone(),this.w)}flip(){this.n.negate();this.w=-this.w}
+ split(q,cf,cb,f,b){let ty=0;const t=q.v.map(v=>{const d=this.n.dot(v.p)-this.w,r=d<-1e-5?2:d>1e-5?1:0;ty|=r;return r});
+  if(ty==0)(this.n.dot(q.pl.n)>0?cf:cb).push(q);else if(ty==1)f.push(q);else if(ty==2)b.push(q);
+  else{const F=[],B=[],n=q.v.length;for(let i=0;i<n;i++){const j=(i+1)%n,vi=q.v[i],vj=q.v[j];
+   if(t[i]!=2)F.push(vi);if(t[i]!=1)B.push(t[i]!=2?vi.clone():vi);
+   if((t[i]|t[j])==3){const k=(this.w-this.n.dot(vi.p))/this.n.dot(vj.p.clone().sub(vi.p)),v=vi.lerp(vj,k);F.push(v);B.push(v.clone())}}
+   if(F.length>=3)f.push(new Pg(F));if(B.length>=3)b.push(new Pg(B))}}}
+class Pg{constructor(v){this.v=v;const a=v[0].p,n=v[1].p.clone().sub(a).cross(v[2].p.clone().sub(a)).normalize();this.pl=new Pl(n,n.dot(a))}
+ flip(){this.v.reverse();this.v.forEach(x=>x.n.negate());this.pl.flip()}}
+class Nd{constructor(p){this.pl=null;this.f=null;this.b=null;this.p=[];if(p)this.build(p)}
+ invert(){this.p.forEach(q=>q.flip());this.pl.flip();if(this.f)this.f.invert();if(this.b)this.b.invert();[this.f,this.b]=[this.b,this.f]}
+ clip(ps){if(!this.pl)return ps.slice();let f=[],b=[];for(const q of ps)this.pl.split(q,f,b,f,b);if(this.f)f=this.f.clip(f);b=this.b?this.b.clip(b):[];return f.concat(b)}
+ clipTo(n){this.p=n.clip(this.p);if(this.f)this.f.clipTo(n);if(this.b)this.b.clipTo(n)}
+ all(){let r=this.p.slice();if(this.f)r=r.concat(this.f.all());if(this.b)r=r.concat(this.b.all());return r}
+ build(ps){if(!ps.length)return;if(!this.pl)this.pl=ps[0].pl.clone();const f=[],b=[];for(const q of ps)this.pl.split(q,this.p,this.p,f,b);
+  if(f.length){if(!this.f)this.f=new Nd();this.f.build(f)}if(b.length){if(!this.b)this.b=new Nd();this.b.build(b)}}}
+function polysOf(p,d){const q=p.q,P=V(...p.pos),out=[];for(let i=0;i<d.pos.length;i+=9){const v=[0,3,6].map(k=>new Vx(V(d.pos[i+k],d.pos[i+k+1],d.pos[i+k+2]).applyQuaternion(q).add(P),V(d.nor[i+k],d.nor[i+k+1],d.nor[i+k+2]).applyQuaternion(q)));
+ if(v[1].p.clone().sub(v[0].p).cross(v[2].p.clone().sub(v[0].p)).lengthSq()>1e-10)out.push(new Pg(v))}return out}
+function cutPart(p,negs){let polys=polysOf(p,partData(p));
+ for(const g of negs){const a=new Nd(polys),b=new Nd(polysOf(g,partData(g)));a.invert();a.clipTo(b);b.clipTo(a);b.invert();b.clipTo(a);b.invert();a.build(b.all());a.invert();polys=a.all()}
+ const P=V(...p.pos),qi=p.q.clone().invert(),pos=[],nor=[];
+ for(const g of polys)for(let k=1;k<g.v.length-1;k++)for(const v of[g.v[0],g.v[k],g.v[k+1]]){const a=v.p.clone().sub(P).applyQuaternion(qi),n=v.n.clone().applyQuaternion(qi);pos.push(a.x,a.y,a.z);nor.push(n.x,n.y,n.z)}
+ return{pos:Float32Array.from(pos),nor:Float32Array.from(nor)}}
+function setGeo(p,d){const g=new T.BufferGeometry();g.setAttribute('position',new T.BufferAttribute(d.pos,3));g.setAttribute('normal',new T.BufferAttribute(d.nor,3));p.mesh.geometry.dispose();p.mesh.geometry=g}
+function updateCuts(){const negs=parts.filter(p=>p.neg);
+ for(const p of parts){if(p.neg){if(p.cut){p.cut=0;p.cutData=null;p.ck=null;p.mesh.geometry.dispose();p.mesh.geometry=geo(p)}continue}
+  const c=V(...p.pos),hit=p.nocut?[]:negs.filter(g=>c.distanceTo(V(...g.pos))<(V(...p.size).length()+V(...g.size).length())/2);
+  if(hit.length){const key=JSON.stringify([p.type,p.pos,p.size,p.q.toArray(),hit.map(g=>[g.type,g.pos,g.size,g.q.toArray()])]);
+   if(key!=p.ck){p.ck=key;p.cutData=cutPart(p,hit);setGeo(p,p.cutData);p.cut=1}}
+  else if(p.cut){p.cut=0;p.cutData=null;p.ck=null;p.mesh.geometry.dispose();p.mesh.geometry=geo(p)}}}
+
+// ---------- parts ----------
+const parts=[];let sels=[],sel=null,tool='select',cnt=0,dirty=true,U=[],Rr=[];
+function applyMat(p){const m=MATS[p.mat],o=p.mesh.material,tr=p.neg?.6:p.tr;o.color.set(p.neg?0xff3b3b:p.color);o.roughness=m.r??.65;o.metalness=m.m||0;
+ o.emissive.set(m.em&&!p.neg?p.color:0);o.transparent=tr>0;o.opacity=1-tr;o.depthWrite=!p.neg;o.needsUpdate=true;dirty=true}
+function sync(p){p.mesh.position.set(...p.pos);p.mesh.quaternion.copy(p.q);dirty=true}
+function rebuild(p){p.mesh.geometry.dispose();p.mesh.geometry=geo(p);p.cut=0;p.ck=null;p.cutData=null;dirty=true}
+function mkPart(type,o={}){const p=Object.assign({id:++cnt,name:type+cnt,type,pos:[0,0,0],size:[...TYPES[type]],color:'#a3a2a5',mat:'Plastic',tr:0,neg:false,nocut:false,q:new T.Quaternion()},o);cnt=Math.max(cnt,p.id);
+ p.mesh=new T.Mesh(geo(p),new T.MeshStandardMaterial());scene.add(p.mesh);parts.push(p);applyMat(p);sync(p);return p}
+function addPart(type,o){checkpoint();const p=mkPart(type,o);select(p);return p}
+function insert(type){const f=cam.getWorldDirection(V(0,0,0)),s=TYPES[type];let pt;
+ if(f.y<-.05){const t=-cam.position.y/f.y;pt=cam.position.clone().addScaledVector(f,Math.min(t,60))}else pt=cam.position.clone().addScaledVector(f,25);
+ addPart(type,{pos:[Math.round(pt.x),s[1]/2,Math.round(pt.z)]})}
+function del(){if(!sels.length)return;checkpoint();sels.forEach(p=>{scene.remove(p.mesh);p.mesh.geometry.dispose();parts.splice(parts.indexOf(p),1)});dirty=true;select(null)}
+function uniq(n){if(!parts.some(p=>p.name==n))return n;const b=n.replace(/_\d+$/,'');let i=2;while(parts.some(p=>p.name==b+'_'+i))i++;return b+'_'+i}
+let clip=[],pasteN=0;
+function copySel(){if(!sel)return;clip=sels.map(p=>({type:p.type,name:p.name,size:[...p.size],pos:[...p.pos],color:p.color,mat:p.mat,tr:p.tr,neg:p.neg,nocut:p.nocut,q:p.q.toArray()}));pasteN=0;toast('Copied '+clip.length+' part(s)')}
+function pasteSel(){if(!clip.length)return;checkpoint();pasteN++;const o=2*pasteN;setSel(clip.map(d=>mkPart(d.type,{...d,name:uniq(d.name),size:[...d.size],pos:[d.pos[0]+o,d.pos[1],d.pos[2]+o],q:new T.Quaternion().fromArray(d.q)})))}
+function dup(){if(!sel)return;checkpoint();const w=sel.size[0];setSel(sels.map(p=>mkPart(p.type,{name:uniq(p.name),nocut:p.nocut,size:[...p.size],color:p.color,mat:p.mat,tr:p.tr,neg:p.neg,pos:[p.pos[0]+w,p.pos[1],p.pos[2]],q:p.q.clone()})))}
+const getRot=p=>{const e=new T.Euler().setFromQuaternion(p.q,'YXZ');return[e.x/D,e.y/D,e.z/D]};
+const setRot=(p,r)=>p.q.setFromEuler(new T.Euler(r[0]*D,r[1]*D,r[2]*D,'YXZ'));
+const gc=()=>{const c=V(0,0,0);sels.forEach(p=>c.add(V(...p.pos)));return c.multiplyScalar(1/Math.max(1,sels.length))};
+function rotSel(ax,deg){if(!sel)return;checkpoint();const c=gc(),dq=new T.Quaternion().setFromAxisAngle(AX[ax],deg*D);
+ sels.forEach(p=>{const v=V(...p.pos).sub(c).applyQuaternion(dq).add(c);p.pos=[v.x,v.y,v.z];p.q.premultiply(dq);sync(p)});refreshProps()}
+function negSel(){if(!sel)return;checkpoint();const v=!sel.neg;sels.forEach(p=>{p.neg=v;applyMat(p)});refreshProps()}
+
+// ---------- undo / redo ----------
+const snap=()=>JSON.stringify({p:parts.map(p=>({id:p.id,name:p.name,type:p.type,pos:p.pos,size:p.size,color:p.color,mat:p.mat,tr:p.tr,neg:p.neg,nocut:p.nocut,q:p.q.toArray()})),s:sels.map(p=>p.id)});
+function checkpoint(){U.push(snap());if(U.length>100)U.shift();Rr=[]}
+function restore(j){const o=JSON.parse(j);parts.forEach(p=>{scene.remove(p.mesh);p.mesh.geometry.dispose()});parts.length=0;
+ o.p.forEach(d=>mkPart(d.type,{...d,q:new T.Quaternion().fromArray(d.q)}));setSel(parts.filter(p=>o.s.includes(p.id)));dirty=true}
+function undo(){if(!U.length)return;Rr.push(snap());restore(U.pop())}
+function redo(){if(!Rr.length)return;U.push(snap());restore(Rr.pop())}
+
+// ---------- selection boxes + handles ----------
+const sbG=new T.EdgesGeometry(new T.BoxGeometry(1,1,1)),sbM=new T.LineBasicMaterial({color:0x0d99ff,depthTest:false}),sbs=[];
+function sbox(i){if(!sbs[i]){const s=new T.LineSegments(sbG,sbM);s.renderOrder=998;scene.add(s);sbs[i]=s}return sbs[i]}
+let hs=[];const hm=c=>new T.MeshBasicMaterial({color:c,depthTest:false,transparent:true,opacity:.9});
+function buildHandles(){hs.forEach(h=>scene.remove(h.obj));hs=[];if(!sel||tool=='select')return;
+ const add=(h,o)=>{o.traverse(m=>{m.renderOrder=999});o.userData.h=h;h.obj=o;scene.add(o);hs.push(h)};
+ for(let i=0;i<3;i++){
+  if(tool=='move'){const g=new T.Group(),m=hm(COL[i]);const a=new T.Mesh(new T.CylinderGeometry(.07,.07,2.2),m);a.position.y=1.1;const c=new T.Mesh(new T.ConeGeometry(.3,.8,12),m);c.position.y=2.6;g.add(a,c);
+   const w=new T.Group();w.add(g);w.quaternion.setFromUnitVectors(V(0,1,0),AX[i]);add({kind:'move',i},w)}
+  if(tool=='scale'&&sels.length==1)for(const s of[1,-1])add({kind:'scale',i,s},new T.Mesh(new T.SphereGeometry(.5,12,8),hm(COL[i])));
+  if(tool=='rotate'){const r=new T.Mesh(new T.TorusGeometry(1,.035,8,64),hm(COL[i]));r.quaternion.setFromUnitVectors(V(0,0,1),AX[i]);add({kind:'rot',i},r)}}}
+function updateSel(){sbs.forEach(s=>s.visible=false);if(!sels.length)return;
+ sels.forEach((p,i)=>{const s=sbox(i);s.visible=true;s.position.set(...p.pos);s.quaternion.copy(p.q);s.scale.set(...p.size.map(v=>v+.04))});
+ const c=gc(),k=cam.position.distanceTo(c)*.07;
+ for(const h of hs){const o=h.obj;if(h.kind=='move'){o.position.copy(c);o.scale.setScalar(k)}
+  else if(h.kind=='scale'){o.position.copy(c).addScaledVector(AX[h.i].clone().applyQuaternion(sel.q),h.s*(sel.size[h.i]/2+.9*k));o.scale.setScalar(k*.4)}
+  else{o.position.copy(c);o.scale.setScalar(sels.length==1?V(...sel.size).length()/2+k:Math.max(...sels.map(p=>V(...p.pos).distanceTo(c)+V(...p.size).length()/2))+k)}}}
+function setSel(a){sels=a;sel=a[a.length-1]||null;buildHandles();listUI();refreshProps()}
+const select=p=>setSel(p?[p]:[]);
+function setTool(t){tool=t;[...$('tools').children].forEach(b=>b.classList.toggle('on',b.dataset.t==t));buildHandles()}
+
+// ---------- dragging / picking ----------
+let drag=null,look=false,pan=false,bx=null,bodyDrag=null;const keys={};
+const sn=(v,s)=>s>0?Math.round(v/s)*s:v;
+function ray(e){const r=cv.getBoundingClientRect(),rc=new T.Raycaster();rc.setFromCamera(new T.Vector2((e.clientX-r.left)/r.width*2-1,-(e.clientY-r.top)/r.height*2+1),cam);return rc.ray}
+function lineT(P,d,r){const w=P.clone().sub(r.origin),b=d.dot(r.direction),den=1-b*b;return den<1e-6?0:(b*r.direction.dot(w)-d.dot(w))/den}
+function ang(r,n,c){const dn=r.direction.dot(n);if(Math.abs(dn)<1e-6)return null;const pt=r.origin.clone().addScaledVector(r.direction,c.clone().sub(r.origin).dot(n)/dn).sub(c);
+ const bu=(Math.abs(n.y)<.9?V(0,1,0):V(1,0,0)).cross(n).normalize(),bv=n.clone().cross(bu);return Math.atan2(pt.dot(bv),pt.dot(bu))}
+const dirW=(h,q)=>AX[h.i].clone().applyQuaternion(q).multiplyScalar(h.s||1);
+cv.addEventListener('contextmenu',e=>e.preventDefault());
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);if(e.button==2){look=true;return}if(e.button==1){e.preventDefault();pan=true;return}if(e.button)return;
+ const r=ray(e),rc=new T.Raycaster(r.origin,r.direction),hh=rc.intersectObjects(hs.map(h=>h.obj),true),add=e.ctrlKey||e.shiftKey||e.metaKey;
+ if(hh.length){let o=hh[0].object;while(!o.userData.h)o=o.parent;const h=o.userData.h,c0=gc();
+  drag={h,c0,items:sels.map(p=>({p,pos:[...p.pos],q:p.q.clone(),size:[...p.size]}))};const it=drag.items[drag.items.length-1];
+  if(h.kind=='move')drag.t0=lineT(c0,AX[h.i],r);
+  else if(h.kind=='scale'){drag.d=dirW(h,it.q);drag.t0=lineT(c0.clone().addScaledVector(drag.d,it.size[h.i]/2),drag.d,r)}
+  else{drag.n=AX[h.i].clone();drag.a0=ang(r,drag.n,c0)}return}
+ const m=rc.intersectObjects(parts.map(p=>p.mesh)),p=m.length?parts.find(q=>q.mesh==m[0].object):null;
+ if(p){if(add)setSel(sels.includes(p)?sels.filter(q=>q!=p):[...sels,p]);
+  else{if(!sels.includes(p))setSel([p]);bodyDrag={p,x:e.clientX,y:e.clientY,pt:m[0].point.clone(),vert:e.altKey,moved:false,items:sels.map(q=>({p:q,pos:[...q.pos]}))}}}
+ else bx={x:e.clientX,y:e.clientY,add,moved:false}});
+cv.addEventListener('pointermove',e=>{
+ if(pan){const d=cam.position.distanceTo(sels.length?gc():V(0,0,0))*.0015+.02,r=V(1,0,0).applyQuaternion(cam.quaternion),u=V(0,1,0).applyQuaternion(cam.quaternion);cam.position.addScaledVector(r,-e.movementX*d).addScaledVector(u,e.movementY*d);return}
+ if(look){yaw-=e.movementX*.004;pitch=Math.max(-1.5,Math.min(1.5,pitch-e.movementY*.004));return}
+ if(bodyDrag){const b=bodyDrag;if(!b.moved){if(Math.abs(e.clientX-b.x)+Math.abs(e.clientY-b.y)<5)return;b.moved=true;checkpoint()}
+  const r=ray(e);let d;
+  if(!b.vert){const t=(b.pt.y-r.origin.y)/r.direction.y;if(Math.abs(r.direction.y)<1e-3||t<0||t>800)return;d=r.origin.clone().addScaledVector(r.direction,t).sub(b.pt);d.y=0}
+  else{const f=cam.getWorldDirection(V(0,0,0));f.y=0;f.normalize();const den=r.direction.dot(f);if(Math.abs(den)<1e-3)return;const t=b.pt.clone().sub(r.origin).dot(f)/den;d=V(0,r.origin.clone().addScaledVector(r.direction,t).y-b.pt.y,0)}
+  const ms=+$('ms').value;d.set(sn(d.x,ms),sn(d.y,ms),sn(d.z,ms));
+  b.items.forEach(({p,pos})=>{p.pos=[pos[0]+d.x,pos[1]+d.y,pos[2]+d.z];sync(p)});refreshProps();return}
+ if(bx){const dx=e.clientX-bx.x,dy=e.clientY-bx.y;if(Math.abs(dx)+Math.abs(dy)>4)bx.moved=true;
+  if(bx.moved){const rr=cv.getBoundingClientRect(),b=$('box').style;b.display='block';b.left=Math.min(bx.x,e.clientX)-rr.left+'px';b.top=Math.min(bx.y,e.clientY)-rr.top+'px';b.width=Math.abs(dx)+'px';b.height=Math.abs(dy)+'px'}return}
+ if(!drag)return;if(!drag.cp){checkpoint();drag.cp=1}
+ const r=ray(e),{h,c0,items}=drag,it=items[items.length-1],ms=+$('ms').value,rs=+$('rs').value;
+ if(h.kind=='move'){const d=sn(lineT(c0,AX[h.i],r)-drag.t0,ms);items.forEach(({p,pos})=>{p.pos=pos.map((v,k)=>v+AX[h.i].getComponent(k)*d);sync(p)})}
+ else if(h.kind=='scale'){const p=it.p,t=lineT(c0.clone().addScaledVector(drag.d,it.size[h.i]/2),drag.d,r),ns=Math.max(ms>0?ms:.05,it.size[h.i]+sn(t-drag.t0,ms)),dd=ns-it.size[h.i];
+  p.size=[...it.size];p.size[h.i]=ns;p.pos=it.pos.map((v,k)=>v+drag.d.getComponent(k)*dd/2);rebuild(p);sync(p)}
+ else{const a=ang(r,drag.n,c0);if(a===null)return;const dq=new T.Quaternion().setFromAxisAngle(drag.n,sn((a-drag.a0)/D,rs)*D);
+  items.forEach(({p,pos,q})=>{const v=V(...pos).sub(c0).applyQuaternion(dq).add(c0);p.pos=[v.x,v.y,v.z];p.q.copy(dq).multiply(q);sync(p)})}
+ refreshProps()});
+cv.addEventListener('pointerup',e=>{
+ if(bodyDrag){if(!bodyDrag.moved&&sels.length>1)setSel([bodyDrag.p]);bodyDrag=null}
+ if(bx){$('box').style.display='none';
+  if(bx.moved){const rr=cv.getBoundingClientRect(),x0=Math.min(bx.x,e.clientX),x1=Math.max(bx.x,e.clientX),y0=Math.min(bx.y,e.clientY),y1=Math.max(bx.y,e.clientY);
+   const inn=parts.filter(p=>{const v=V(...p.pos).project(cam),sx=(v.x+1)/2*rr.width+rr.left,sy=(1-v.y)/2*rr.height+rr.top;return v.z<1&&sx>=x0&&sx<=x1&&sy>=y0&&sy<=y1});
+   setSel(bx.add?[...new Set([...sels,...inn])]:inn)}
+  else if(!bx.add)select(null);bx=null}
+ drag=null;look=false;pan=false});
+cv.addEventListener('wheel',e=>{e.preventDefault();const d=sels.length?cam.position.distanceTo(gc()):20;cam.position.addScaledVector(cam.getWorldDirection(V(0,0,0)),-e.deltaY*.001*Math.max(4,d)*(keys.shift?.3:1))},{passive:false});
+addEventListener('keydown',e=>{if(/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;const k=e.key.toLowerCase();
+ if(e.ctrlKey||e.metaKey){if(k=='z'){e.preventDefault();e.shiftKey?redo():undo()}else if(k=='y'){e.preventDefault();redo()}else if(k=='d'){e.preventDefault();dup()}else if(k=='a'){e.preventDefault();setSel([...parts])}else if(k=='c')copySel();else if(k=='x'){copySel();del()}else if(k=='v'){e.preventDefault();pasteSel()}return}
+ keys[k]=1;
+ if(k=='delete'||k=='backspace')del();else if('1234'.includes(k)&&k)setTool(['select','move','scale','rotate'][k-1]);
+ else if(k=='r')rotSel(1,90);else if(k=='t')rotSel(2,90);else if(k=='n')negSel();
+ else if(k=='f'&&sel){const f=cam.getWorldDirection(V(0,0,0));cam.position.copy(gc()).addScaledVector(f,-(Math.max(...sels.flatMap(p=>p.size))*1.8+8))}});
+addEventListener('keyup',e=>keys[e.key.toLowerCase()]=0);
+addEventListener('blur',()=>{for(const k in keys)keys[k]=0});
+
+// ---------- UI ----------
+['Select','Move','Scale','Rotate'].forEach((n,i)=>{const b=document.createElement('button');b.textContent=`${i+1} ${n}`;b.dataset.t=n.toLowerCase();b.onclick=()=>setTool(b.dataset.t);$('tools').appendChild(b)});
+Object.keys(TYPES).forEach(t=>{const b=document.createElement('button');b.textContent='+ '+t;b.onclick=()=>insert(t);$('ins').appendChild(b)});
+[['Undo',undo],['Redo',redo],['Copy',copySel],['Paste',pasteSel],['Negate (N)',negSel]].forEach(([n,fn])=>{const b=document.createElement('button');b.textContent=n;b.onclick=fn;$('act').appendChild(b)});
+const props=$('props');
+props.innerHTML=`<div class=row><label>Name</label><input id=pn></div>`+[['Position','pos'],['Orientation','rot'],['Size','size']].map(([l,k])=>`<div class=row><label>${l}</label>${[0,1,2].map(i=>`<input type=number step=any data-k=${k} data-i=${i}>`).join('')}</div>`).join('')+
+`<div class=row><label>Color</label><input type=color id=pc></div><div class=row><label>Material</label><select id=pm>${Object.keys(MATS).map(m=>`<option>${m}</option>`).join('')}</select></div><div class=row><label>Transparency</label><input type=number id=pt min=0 max=1 step=.1></div><div class=row><label>Negate</label><input type=checkbox id=pg style="flex:none"><span style="color:#aaa">cuts holes in overlapping parts</span></div><div class=row><label>Ignore cuts</label><input type=checkbox id=pk style="flex:none"><span style="color:#aaa">negate parts can't cut this part</span></div>`;
+function refreshProps(){props.style.opacity=sel?1:.4;if(!sel)return;const r=getRot(sel),one=sels.length==1;
+ props.querySelectorAll('[data-k]').forEach(i=>{const k=i.dataset.k,v=(k=='rot'?r:sel[k])[i.dataset.i];i.disabled=!one;if(document.activeElement!=i)i.value=+v.toFixed(3)});
+ $('pn').disabled=!one;$('pn').value=sel.name;$('pc').value=sel.color;$('pm').value=sel.mat;$('pt').value=sel.tr;$('pg').checked=sel.neg;$('pk').checked=!!sel.nocut}
+let pd=false;props.addEventListener('focusin',()=>pd=false);
+props.addEventListener('input',e=>{const t=e.target;if(!sel)return;if(!pd){checkpoint();pd=true}const k=t.dataset.k;
+ if(k){const i=+t.dataset.i,v=parseFloat(t.value);if(isNaN(v))return;
+  if(k=='pos')sel.pos[i]=v;else if(k=='size'){sel.size[i]=Math.max(.05,v);rebuild(sel)}else{const r=getRot(sel);r[i]=v;setRot(sel,r)}sync(sel)}
+ else if(t.id=='pn'){sel.name=t.value;listUI()}
+ else if(t.id=='pc')sels.forEach(p=>{p.color=t.value;applyMat(p)});
+ else if(t.id=='pm')sels.forEach(p=>{p.mat=t.value;applyMat(p)});
+ else if(t.id=='pt')sels.forEach(p=>{p.tr=Math.min(1,Math.max(0,+t.value||0));applyMat(p)});
+ else if(t.id=='pg')sels.forEach(p=>{p.neg=t.checked;applyMat(p)});
+ else if(t.id=='pk')sels.forEach(p=>{p.nocut=t.checked;dirty=true})});
+function listUI(){$('ex').innerHTML='';parts.forEach(p=>{const li=document.createElement('li');li.textContent=p.name+(p.neg?'  (negate)':'');li.className=sels.includes(p)?'sel':'';
+ li.onclick=e=>setSel(e.ctrlKey||e.shiftKey?(sels.includes(p)?sels.filter(q=>q!=p):[...sels,p]):[p]);$('ex').appendChild(li)})}
+
+// ---------- AI build: command language, prompt, scene export ----------
+const hint=$('hint'),hint0=hint.textContent;let tt;
+function toast(m){hint.textContent=m;clearTimeout(tt);tt=setTimeout(()=>hint.textContent=hint0,6000)}
+async function copy(t,label){try{await navigator.clipboard.writeText(t)}catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove()}toast(label+' copied to clipboard')}
+const TYMAP={block:'Block',part:'Block',brick:'Block',cube:'Block',sphere:'Sphere',ball:'Sphere',wedge:'Wedge',cornerwedge:'CornerWedge',corner:'CornerWedge',cylinder:'Cylinder',cyl:'Cylinder'};
+const vv=v=>{const a=Array.isArray(v)?v.map(Number):String(v).split(',').map(Number);if(a.length!=3||a.some(x=>!isFinite(x)))throw'expected x,y,z but got "'+v+'"';return a};
+function applyProps(p,o){for(const[k,v]of Object.entries(o)){
+ if(k=='pos')p.pos=vv(v);else if(k=='size')p.size=vv(v).map(x=>Math.min(2048,Math.max(.05,x)));else if(k=='rot')setRot(p,vv(v));
+ else if(k=='color')p.color='#'+new T.Color(v).getHexString();
+ else if(k=='mat'||k=='material'){const m=Object.keys(MATS).find(x=>x.toLowerCase()==String(v).toLowerCase());if(!m)throw'unknown material "'+v+'"';p.mat=m}
+ else if(k=='tr')p.tr=Math.min(1,Math.max(0,+v||0));
+ else if(k=='neg')p.neg=v===true||/^(1|true|yes)$/i.test(String(v));
+ else if(k=='nocut')p.nocut=v===true||/^(1|true|yes)$/i.test(String(v));
+ else if(k=='name')p.name=String(v);else throw'unknown property "'+k+'"'}
+ rebuild(p);applyMat(p);sync(p)}
+function clearAll(){parts.forEach(p=>{scene.remove(p.mesh);p.mesh.geometry.dispose()});parts.length=0}
+function parseItems(text){text=text.replace(/^\s*```.*$/gm,'').trim();const items=[];
+ if(/^[\[{]/.test(text)){let j=JSON.parse(text);if(!Array.isArray(j))j=j.parts||[];
+  j.forEach((o,i)=>{const{type,shape,...kv}=o;items.push({cmd:String(type||shape||'').toLowerCase(),kv,ref:'part '+(i+1)})})}
+ else text.split('\n').forEach((raw,i)=>{const l=raw.trim();if(!l||l[0]=='#'||l.startsWith('//'))return;
+  const t=l.split(/\s+/),it={cmd:t.shift().toLowerCase(),kv:{},ref:'line '+(i+1)};
+  if(it.cmd=='set'||it.cmd=='delete')it.target=t.shift();
+  t.forEach(x=>{const k=x.indexOf('=');if(k<0)it.kv[x.toLowerCase()]='1';else it.kv[x.slice(0,k).toLowerCase()]=x.slice(k+1)});items.push(it)});
+ return items}
+function runScript(text,replace){const log=[];let items;
+ try{items=parseItems(text)}catch(e){return{log:['Could not read the input: '+e.message],made:0}}
+ if(!items.length)return{log:['Nothing to run.'],made:0};
+ checkpoint();if(replace)clearAll();const made=[];
+ for(const it of items){try{
+  if(it.cmd=='clear')clearAll();
+  else if(it.cmd=='delete'||it.cmd=='set'){const p=parts.find(q=>q.name==it.target);if(!p)throw'no part named "'+it.target+'"';
+   if(it.cmd=='set')applyProps(p,it.kv);else{scene.remove(p.mesh);p.mesh.geometry.dispose();parts.splice(parts.indexOf(p),1)}}
+  else{const type=TYMAP[it.cmd.replace(/[^a-z]/g,'')];if(!type)throw'unknown command or shape "'+it.cmd+'"';if(parts.length>=3000)throw'part limit (3000) reached';
+   const kv={...it.kv};if(!kv.pos)kv.pos=[0,(kv.size?vv(kv.size)[1]:TYPES[type][1])/2,0];const p=mkPart(type);try{applyProps(p,kv)}catch(e){scene.remove(p.mesh);p.mesh.geometry.dispose();parts.splice(parts.indexOf(p),1);throw e}made.push(p)}
+ }catch(e){log.push(it.ref+': '+(e.message||e))}}
+ setSel(made.filter(p=>parts.includes(p)));dirty=true;
+ log.unshift(`Created ${made.length} part(s)`+(log.length?`, ${log.length} problem(s):`:'.'));return{log,made:made.length}}
+const nf=v=>+(+v).toFixed(3);
+function sceneText(){return parts.map(p=>{const r=getRot(p).map(nf);let l=`${p.type} name=${p.name.replace(/\s+/g,'_')} pos=${p.pos.map(nf)} size=${p.size.map(nf)}`;
+ if(r.some(x=>Math.abs(x)>1e-3))l+=` rot=${r}`;l+=` color=${p.color} mat=${p.mat}`;if(p.tr)l+=` tr=${p.tr}`;if(p.neg)l+=' neg=1';if(p.nocut)l+=' nocut=1';return l}).join('\n')}
+const AI_PROMPT=`Reply with ONLY one code block of build commands (one per line, no prose) that builds the user's request in "Part Builder", a Roblox-Studio-style block builder.
+UNITS: studs. Y up, ground top y=0, X right, Z toward viewer. pos = part CENTER; size = full x,y,z extent; a part on the ground has pos.y=size.y/2. Parts touch when center distance = sum of half-sizes, so compute exactly. rot=rx,ry,rz degrees (Roblox Orientation, default 0). Scale: character ~5 tall, door 4x7, wall 10-12.
+TYPES (default size): Block 4,1,2 | Sphere 4,4,4 | Cylinder 2,2,2 (axis along X, size=length,diam,diam; upright: rot=0,0,90) | Wedge 4,1,2 (slope rises toward +Z, tall face at +Z) | CornerWedge 2,1,2 (high corner at -X,+Z).
+MATERIALS: ${Object.keys(MATS).join(', ')} (Glass: tr=0.5). Colors: #hex.
+SYNTAX: Type name=N pos=x,y,z size=x,y,z rot=x,y,z color=#hex mat=M tr=0-1 neg=1 nocut=1
+ set N key=val ... | delete N | clear (first line when rebuilding everything) | # comment
+CUTS: neg=1 parts subtract from EVERY overlapping part (including pieces placed in the hole) and are not exported; let them stick out >=0.5 past the faces. nocut=1 makes a part immune to cuts (glass panes, doors, trim inside holes).
+STYLE: chunky Roblox blocks, few colors, ~20-150 parts; Wedge for roofs/ramps, Cylinder for pillars/wheels. Whole/half numbers, avoid coplanar overlaps, unique names (letters/digits/_).
+EXAMPLE (house with window)
+clear
+Block name=Floor pos=0,0.5,0 size=16,1,16 color=#8d6e63 mat=SmoothPlastic
+Block name=Wall_Back pos=0,5,-7.5 size=16,8,1 color=#eeeeee
+Block name=Wall_Left pos=-7.5,5,0 size=1,8,14 color=#eeeeee
+Block name=Wall_Right pos=7.5,5,0 size=1,8,14 color=#eeeeee
+Block name=Window_Cut pos=4,5.5,-7.5 size=3,3,3 neg=1
+Block name=Window_Glass pos=4,5.5,-7.5 size=3,3,0.2 color=#aee6ff mat=Glass tr=0.5 nocut=1
+Block name=Roof pos=0,9.5,0 size=18,1,18 color=#b71c1c
+Cylinder name=Chimney pos=5,12,3 size=4,2,2 rot=0,0,90 color=#6d4c41
+If given an existing scene, reply with the full updated list starting with "clear", or only new/set/delete lines for small edits.
+REQUEST:
+`;
+$('aiClose').onclick=()=>$('ai').style.display='none';
+$('aiPrompt').onclick=()=>copy(AI_PROMPT,'AI prompt');
+$('aiScene').onclick=()=>copy(sceneText()||'# (empty scene)','Current scene');
+$('aiRun').onclick=()=>{const r=runScript($('aiIn').value,document.querySelector('input[name=aim]:checked').value=='replace');$('aiLog').textContent=r.log.join('\n');if(r.made)toast('Built '+r.made+' part(s)')};
+$('cmd').addEventListener('keydown',e=>{if(e.key=='Enter'&&e.target.value.trim()){const r=runScript(e.target.value,false);toast(r.log.join(' | '));e.target.value=''}});
+{const b=document.createElement('button');b.textContent='AI Build';b.onclick=()=>{$('ai').style.display='flex';$('aiIn').focus()};$('act').appendChild(b)}
+window.builder={run:runScript,scene:sceneText,prompt:AI_PROMPT};
+
+// ---------- FBX export (ASCII 7.4) + standalone textures ----------
+function dl(blob,name){const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
+// binary FBX 7.4 writer (widest viewer compatibility)
+const enc=new TextEncoder(),S=v=>({t:'S',v}),I=v=>({t:'I',v}),L=v=>({t:'L',v}),Dd=v=>({t:'D',v}),AD=v=>({t:'d',v}),AI=v=>({t:'i',v}),N=(n,p=[],k)=>[n,p,k];
+function pbytes(p){let b,dv,t=p.t;
+ if(t=='I'){b=new Uint8Array(5);dv=new DataView(b.buffer);b[0]=73;dv.setInt32(1,p.v,true)}
+ else if(t=='L'){b=new Uint8Array(9);dv=new DataView(b.buffer);b[0]=76;dv.setBigInt64(1,BigInt(p.v),true)}
+ else if(t=='D'){b=new Uint8Array(9);dv=new DataView(b.buffer);b[0]=68;dv.setFloat64(1,p.v,true)}
+ else if(t=='S'){const e=enc.encode(p.v);b=new Uint8Array(5+e.length);dv=new DataView(b.buffer);b[0]=83;dv.setUint32(1,e.length,true);b.set(e,5)}
+ else{const dbl=t=='d',a=dbl?Float64Array.from(p.v):Int32Array.from(p.v),bl=a.length*(dbl?8:4);b=new Uint8Array(13+bl);dv=new DataView(b.buffer);b[0]=dbl?100:105;dv.setUint32(1,a.length,true);dv.setUint32(5,0,true);dv.setUint32(9,bl,true);b.set(new Uint8Array(a.buffer),13)}
+ return b}
+function ser([name,props,kids],off){const pb=props.map(pbytes),pl=pb.reduce((a,b)=>a+b.length,0),nl=enc.encode(name),hl=13+nl.length;let cur=off+hl+pl;const kb=[];
+ (kids||[]).forEach(k=>{const b=ser(k,cur);kb.push(b);cur+=b.length});if(kb.length)cur+=13;
+ const out=new Uint8Array(cur-off),dv=new DataView(out.buffer);dv.setUint32(0,cur,true);dv.setUint32(4,props.length,true);dv.setUint32(8,pl,true);out[12]=nl.length;out.set(nl,13);
+ let o=hl;pb.forEach(b=>{out.set(b,o);o+=b.length});kb.forEach(b=>{out.set(b,o);o+=b.length});return out}
+const P70=a=>N('Properties70',[],a.map(x=>N('P',x)));
+function exportFBX(){updateCuts();const EP=parts.filter(p=>!p.neg&&(!p.cutData||p.cutData.pos.length));if(!EP.length)return alert('Add some parts first.');
+ let n=1e6;const id=()=>++n,mk={},objs=[],conns=[],C=(c,p)=>conns.push(N('C',[S('OO'),L(c),L(p)]));
+ EP.forEach(p=>{const d=p.cutData||partData(p),vn=d.pos.length/3;const gi=id(),mo=id(),nm=p.name.replace(/[^\w]/g,'_')+'_'+p.id,key=p.mat+p.color+p.tr;let m=mk[key];
+  if(!m){m=mk[key]=id();const c=new T.Color(p.color);
+   objs.push(N('Material',[L(m),S(p.mat+'_'+p.color.slice(1)+'\0\x01Material'),S('')],[N('Version',[I(102)]),N('ShadingModel',[S('phong')]),N('MultiLayer',[I(0)]),
+    P70([[S('DiffuseColor'),S('Color'),S(''),S('A'),Dd(c.r),Dd(c.g),Dd(c.b)],[S('Opacity'),S('double'),S('Number'),S(''),Dd(1-p.tr)],[S('Shininess'),S('double'),S('Number'),S(''),Dd(MATS[p.mat].m?60:20)]])]))}
+  const idx=[];for(let i=0;i<vn;i+=3)idx.push(i,i+1,-(i+2)-1);
+  objs.push(N('Geometry',[L(gi),S(nm+'\0\x01Geometry'),S('Mesh')],[N('Vertices',[AD(d.pos)]),N('PolygonVertexIndex',[AI(idx)]),N('GeometryVersion',[I(124)]),
+   N('LayerElementNormal',[I(0)],[N('Version',[I(101)]),N('Name',[S('')]),N('MappingInformationType',[S('ByPolygonVertex')]),N('ReferenceInformationType',[S('Direct')]),N('Normals',[AD(d.nor)])]),
+   N('LayerElementMaterial',[I(0)],[N('Version',[I(101)]),N('Name',[S('')]),N('MappingInformationType',[S('AllSame')]),N('ReferenceInformationType',[S('IndexToDirect')]),N('Materials',[AI([0])])]),
+   N('Layer',[I(0)],[N('Version',[I(100)]),N('LayerElement',[],[N('Type',[S('LayerElementNormal')]),N('TypedIndex',[I(0)])]),N('LayerElement',[],[N('Type',[S('LayerElementMaterial')]),N('TypedIndex',[I(0)])])])]));
+  const e=new T.Euler().setFromQuaternion(p.q,'ZYX'),V3=(l,v)=>[S(l),S(l),S(''),S('A'),Dd(v[0]),Dd(v[1]),Dd(v[2])];
+  objs.push(N('Model',[L(mo),S(nm+'\0\x01Model'),S('Mesh')],[N('Version',[I(232)]),P70([V3('Lcl Translation',p.pos),V3('Lcl Rotation',[e.x/D,e.y/D,e.z/D]),V3('Lcl Scaling',[1,1,1])]),N('Shading',[S('Y')]),N('Culling',[S('CullingOff')])]));
+  C(mo,0);C(gi,mo);C(m,mo)});
+ const nm=Object.keys(mk).length,gs=(l,t,v)=>[S(l),S(t),S(t=='int'?'Integer':'Number'),S(''),t=='int'?I(v):Dd(v)],
+ top=[N('FBXHeaderExtension',[],[N('FBXHeaderVersion',[I(1003)]),N('FBXVersion',[I(7400)]),N('Creator',[S('Part Builder')])]),
+  N('GlobalSettings',[],[N('Version',[I(1000)]),P70([gs('UpAxis','int',1),gs('UpAxisSign','int',1),gs('FrontAxis','int',2),gs('FrontAxisSign','int',1),gs('CoordAxis','int',0),gs('CoordAxisSign','int',1),gs('UnitScaleFactor','double',1)])]),
+  N('Documents',[],[N('Count',[I(1)]),N('Document',[L(1),S('Scene'),S('Scene')],[N('RootNode',[L(0)])])]),
+  N('References'),
+  N('Definitions',[],[N('Version',[I(100)]),N('Count',[I(EP.length*2+nm+1)]),
+   ...[['GlobalSettings',1],['Model',EP.length],['Geometry',EP.length],['Material',nm]].map(([a,c])=>N('ObjectType',[S(a)],[N('Count',[I(c)])]))]),
+  N('Objects',[],objs),N('Connections',[],conns)];
+ const hdr=new Uint8Array(27);hdr.set(enc.encode('Kaydara FBX Binary  '),0);hdr[20]=0;hdr[21]=0x1a;hdr[22]=0;new DataView(hdr.buffer).setUint32(23,7400,true);
+ const parts2=[hdr];let off=27;top.forEach(t=>{const b=ser(t,off);parts2.push(b);off+=b.length});
+ parts2.push(new Uint8Array(13));off+=13;
+ const ft=new Uint8Array(16+4+((16-((off+20)%16))%16)+4+120+16);ft.set([0xfa,0xbc,0xab,0x09,0xd0,0xc8,0xd4,0x66,0xb1,0x76,0xfb,0x83,0x1c,0xf7,0x26,0x7e],0);
+ new DataView(ft.buffer).setUint32(ft.length-140,7400,true);ft.set([0xf8,0x5a,0x8c,0x6a,0xde,0xf5,0xd9,0x7e,0xec,0xe9,0x0c,0xe3,0x75,0x8f,0x29,0x0b],ft.length-16);parts2.push(ft);
+ dl(new Blob(parts2,{type:'application/octet-stream'}),'model.fbx')}
+$('exp').onclick=exportFBX;
+
+// ---------- loop ----------
+let last=performance.now(),vel=V(0,0,0);
+(function loop(t){requestAnimationFrame(loop);const dt=Math.min(.1,(t-last)/1e3);last=t;
+ cam.rotation.set(pitch,yaw,0);
+ const f=cam.getWorldDirection(V(0,0,0)),r=V(1,0,0).applyQuaternion(cam.quaternion),w=V(0,0,0);
+ if(keys.w)w.add(f);if(keys.s)w.sub(f);if(keys.d)w.add(r);if(keys.a)w.sub(r);if(keys.e)w.y+=1;if(keys.q)w.y-=1;
+ w.multiplyScalar(36*(keys.shift?.25:1));vel.lerp(w,Math.min(1,dt*14));cam.position.addScaledVector(vel,dt);
+ if(dirty){dirty=false;updateCuts()}updateSel();renderer.render(scene,cam)})(performance.now());
+resize();setTool('move');addPart('Block',{pos:[0,.5,0]});U=[];refreshProps();
+</script></body></html>
