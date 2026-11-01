@@ -1,878 +1,605 @@
 <!DOCTYPE html>
 <html lang="en" class="h-full bg-slate-950 text-slate-100">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI-Native 3D Modelling Studio</title>
-
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-
-    <!-- Three.js r128 and matching OrbitControls build. -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
-
-    <!-- ZIP packaging. -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-
-    <!--
-      Three.js does not ship an FBX exporter in this build. This ESM package
-      exports the Three.js scene and supports external texture file references.
-    -->
-    <script type="module">
-        try {
-            const module = await import(
-                "https://cdn.jsdelivr.net/npm/three-js-fbx-exporter@0.1.3/src/index.js"
-            );
-            window.exportFbxScene = module.exportFbx;
-            window.dispatchEvent(new Event("fbx-exporter-ready"));
-        } catch (error) {
-            console.error("Could not load the FBX exporter:", error);
-            window.fbxExporterLoadError = error;
-            window.dispatchEvent(new Event("fbx-exporter-error"));
-        }
-    </script>
-
-    <style>
-        ::-webkit-scrollbar { width: 6px; height: 6px; }
-        ::-webkit-scrollbar-track { background: #0f172a; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
-        ::-webkit-scrollbar-thumb:hover { background: #475569; }
-        canvas { outline: none; }
-    </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI Mesh Studio</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+<script type="module">
+try {
+  const m = await import("https://cdn.jsdelivr.net/npm/three-js-fbx-exporter@0.1.3/src/index.js");
+  window.exportFbxScene = m.exportFbx;
+} catch (e) { console.error("FBX exporter failed:", e); window.fbxExporterLoadError = e; }
+</script>
+<style>
+::-webkit-scrollbar{width:6px;height:6px}::-webkit-scrollbar-track{background:#0f172a}::-webkit-scrollbar-thumb{background:#334155;border-radius:3px}canvas{outline:none}
+</style>
 </head>
-<body class="h-full flex flex-col overflow-hidden select-none bg-slate-950 font-sans text-slate-200">
+<body class="h-full flex flex-col overflow-hidden bg-slate-950 font-sans text-slate-200">
+<header class="h-14 border-b border-slate-800 bg-slate-900/90 px-4 flex items-center justify-between shrink-0 z-10">
+  <div class="flex items-center space-x-3">
+    <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center"><i class="fa-solid fa-cube text-sm"></i></div>
+    <div><h1 class="font-bold text-sm leading-tight">AI Mesh Studio</h1><p class="text-xs text-slate-400">Custom vertices &bull; Lofts &bull; Tubes &bull; Lathes &bull; Extrusions</p></div>
+  </div>
+  <div class="flex items-center space-x-2">
+    <div class="text-xs text-slate-400 hidden sm:flex space-x-3 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
+      <span>Objects: <b id="objCount" class="text-indigo-400 font-mono">0</b></span><span>Tris: <b id="polyCount" class="text-indigo-400 font-mono">0</b></span>
+    </div>
+    <button onclick="exportFbxWithTextures()" class="px-3 py-1.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg"><i class="fa-solid fa-file-export mr-1"></i>Export FBX + Texture (.zip)</button>
+    <button onclick="clearScene()" class="px-3 py-1.5 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg"><i class="fa-solid fa-trash-can mr-1"></i>Clear</button>
+  </div>
+</header>
+<main class="flex-1 flex overflow-hidden relative">
+  <aside class="w-full md:w-96 border-r border-slate-800 bg-slate-900 flex flex-col z-10 shrink-0">
+    <div class="p-4 border-b border-slate-800">
+      <label class="block text-xs font-semibold uppercase tracking-wider mb-2">1. Describe What You Want</label>
+      <textarea id="userRequestInput" rows="3" placeholder="e.g. A sleek koi fish with flowing fins and layered scales..." class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs placeholder-slate-500 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+    </div>
+    <div class="flex-1 p-4 flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between mb-2">
+        <label class="text-xs font-semibold uppercase tracking-wider"><i class="fa-solid fa-wand-magic-sparkles text-indigo-400 mr-1"></i>2. Copy Prompt for AI</label>
+        <button onclick="copyMasterPrompt()" id="copyBtn" class="px-2.5 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded"><i class="fa-regular fa-copy"></i> Copy Prompt</button>
+      </div>
+      <textarea id="generatedPromptText" readonly class="flex-1 w-full rounded-lg border border-slate-800 bg-slate-950 p-3 text-[11px] font-mono text-slate-400 leading-relaxed resize-none focus:outline-none"></textarea>
+    </div>
+    <div class="p-4 border-t border-slate-800 bg-slate-950/80">
+      <label class="block text-xs font-semibold uppercase tracking-wider mb-2">3. Paste AI Commands JSON</label>
+      <textarea id="aiJsonInput" rows="4" placeholder='[{"type":"mesh","verts":[[0,0,0],[1,0,0],[0,1,0]],"faces":[[0,1,2]]}]' class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs font-mono placeholder-slate-600 focus:outline-none focus:border-indigo-500 resize-none"></textarea>
+      <button onclick="parseAndExecute()" class="w-full mt-3 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs rounded-lg"><i class="fa-solid fa-play mr-1"></i>Execute Commands on Canvas</button>
+    </div>
+  </aside>
+  <section class="flex-1 relative min-w-0">
+    <div id="canvasContainer" class="w-full h-full"></div>
+    <div class="absolute top-4 right-4 flex flex-col space-y-2 z-10">
+      <button onclick="fitCamera()" class="p-2.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-700 rounded-lg" title="Frame model"><i class="fa-solid fa-arrows-to-eye"></i></button>
+      <button onclick="toggleGrid()" class="p-2.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-700 rounded-lg" title="Toggle grid"><i class="fa-solid fa-border-all"></i></button>
+      <button onclick="toggleWireframe()" class="p-2.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-700 rounded-lg" title="Wireframe"><i class="fa-solid fa-vector-square"></i></button>
+      <button onclick="copySceneReport()" class="p-2.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-700 rounded-lg" title="Copy scene report for the AI to self-correct"><i class="fa-solid fa-clipboard-check"></i></button>
+    </div>
+    <div id="inspectorBanner" class="absolute bottom-4 left-4 right-4 bg-slate-900/90 border border-slate-800 rounded-lg p-3 text-xs flex items-center justify-between hidden z-10">
+      <div class="flex items-center space-x-3"><span id="inspectColorBadge" class="w-4 h-4 rounded-full border border-white/20"></span><b id="inspectName">Object</b><span class="text-slate-400 font-mono" id="inspectDetails"></span></div>
+      <button onclick="hideInspector()" class="text-slate-400 hover:text-white p-1"><i class="fa-solid fa-xmark"></i></button>
+    </div>
+    <div id="toast" class="absolute top-4 left-4 text-white text-xs px-3.5 py-2 rounded-lg shadow-xl transition-all duration-300 opacity-0 pointer-events-none z-20 flex items-center space-x-2 bg-indigo-600"><i id="toastIcon" class="fa-solid fa-circle-check"></i><span id="toastMsg"></span></div>
+  </section>
+</main>
 
-    <!-- Top Header -->
-    <header class="h-14 border-b border-slate-800 bg-slate-900/90 backdrop-blur px-4 flex items-center justify-between z-10 shrink-0">
-        <div class="flex items-center space-x-3">
-            <div class="w-8 h-8 rounded-lg bg-gradient-to-tr from-indigo-500 to-purple-500 flex items-center justify-center text-white shadow-lg shadow-indigo-500/30">
-                <i class="fa-solid fa-cube text-sm"></i>
-            </div>
-            <div>
-                <h1 class="font-bold text-sm text-slate-100 leading-tight">AI 3D Architect Engine</h1>
-                <p class="text-xs text-slate-400">Ultra-Simple Commands &bull; PBR Output</p>
-            </div>
-        </div>
+<script>
+let scene, camera, renderer, controls, gridHelper, isWireframe = false;
+const objectsMap = new Map();
+const raycaster = new THREE.Raycaster(), mouse = new THREE.Vector2();
 
-        <div class="flex items-center space-x-2 sm:space-x-4">
-            <div class="text-xs text-slate-400 hidden sm:flex items-center space-x-3 bg-slate-950 px-3 py-1.5 rounded-lg border border-slate-800">
-                <span>Objects: <strong id="objCount" class="text-indigo-400 font-mono">0</strong></span>
-                <span class="text-slate-700">|</span>
-                <span>Polys: <strong id="polyCount" class="text-indigo-400 font-mono">0</strong></span>
-            </div>
+const BASE_SYSTEM_PROMPT = `You are a master 3D modeller with a real mesh engine. You are NOT limited to primitives: you author actual geometry (vertices, faces, lofted surfaces, swept tubes, lathes, extrusions) and design the whole model freely. Think like a sculptor or character artist, not a block-stacker. Silhouette, proportion, taper, curvature and detail are your job. Use as many objects and vertices as the design needs; there is no limit.
 
-            <button onclick="exportFbxWithTextures()" class="px-3 py-1.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 rounded-lg transition-colors flex items-center space-x-1.5">
-                <i class="fa-solid fa-file-export"></i>
-                <span>Export FBX + Texture (.zip)</span>
-            </button>
+OUTPUT: ONLY a valid JSON array of commands. No prose, no Markdown fences. World is Y-up, right-handed, units roughly metres; keep the model within about 10 units and resting on or above y=0.
 
-            <button onclick="clearScene()" class="px-3 py-1.5 text-xs bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 rounded-lg transition-colors flex items-center space-x-1.5">
-                <i class="fa-solid fa-trash-can"></i>
-                <span class="hidden sm:inline">Clear Canvas</span>
-            </button>
-        </div>
-    </header>
+COMMON FIELDS (any command): "id" (unique name; re-using an id replaces it), "p" [x,y,z] position, "r" [rx,ry,rz] radians, "s" [sx,sy,sz] scale, "mirror": "x" | "y" | "z" (auto-creates a reflected copy about the world plane through the origin; model one half of symmetric things like wings, legs, faces, hulls).
+MATERIAL: "c" hex colour, "rough" 0-1, "metal" 0-1, "trans" 0-1 (glass), "opac" 0-1, "emiss" hex, "emissInt" number, "wire" bool.
+PRESETS: "mat": "gold"|"steel"|"chrome"|"copper"|"glass"|"rubber"|"stone"|"wood"|"skin"|"plastic"|"neon" sets colour+material; any explicit field (e.g. "c") overrides it.
+REPEAT: "repeat": {"n":8,"offset":[dx,dy,dz],"rot":[rx,ry,rz],"scale":[sx,sy,sz]} makes n copies, each step adding offset/rotation and multiplying scale (teeth, scales, windows, ribs, stairs). "radial": {"n":6,"axis":"y"} spins n copies around a world axis through the origin (petals, spokes, turbine blades, legs). Repeat and radial combine, and mirror applies afterwards. Max 500 copies per command.
+SHADING: "smooth": true/false (smooth normals vs faceted). Defaults: true for loft/tube/lathe/surface, false for mesh (crisp faces).
+SUBDIVISION: "subdiv": 1-3 applies Loop subdivision, turning a coarse low-poly "mesh" cage into a smooth organic surface (share vertices between faces so it stays watertight). Ideal for creatures, heads, rocks, pillows, cartoon forms.
+SURFACE NOISE (optional, any custom mesh): "displace": {"amp":0.1,"freq":2,"seed":1,"mode":"radial"|"y"} for rock, bark, terrain, hammered metal.
 
-    <!-- Main App Workspace -->
-    <main class="flex-1 flex overflow-hidden relative">
-        <!-- Left Column -->
-        <aside class="w-full md:w-96 border-r border-slate-800 bg-slate-900 flex flex-col z-10 shrink-0">
-            <div class="p-4 border-b border-slate-800 bg-slate-900/50">
-                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 flex items-center justify-between">
-                    <span>1. Describe What You Want</span>
-                    <span class="text-[10px] text-indigo-400 bg-indigo-500/10 px-2 py-0.5 rounded border border-indigo-500/20">Prompt Input</span>
-                </label>
-                <textarea id="userRequestInput" rows="3"
-                    placeholder="e.g. Mechanical dragon with metallic scales, glowing blue core, and large detailed wings..."
-                    class="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-100 placeholder-slate-500 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none transition-all"></textarea>
-            </div>
+CUSTOM GEOMETRY TYPES
+1. "mesh": raw polygon mesh. "verts": [[x,y,z],...] and "faces": [[i,j,k],[i,j,k,l],...] (0-based indices; triangles, quads or convex n-gons, counter-clockwise seen from outside). Share vertices between faces for smooth results. Use for blades, wings, armour plates, gems, hulls, anything angular or hand-shaped.
+2. "loft": skin through cross-sections. EASIEST FORM: "sections": [{"p":[x,y,z],"rx":r,"ry":r,"rot":roll,"pow":2,"off":[dx,dy]},...] plus "axis":"z"|"y"|"x" (direction the body runs, default z) and "n" points per section (default 16). Each section is an ellipse with radii rx/ry centred at p, perpendicular to the axis; "pow" 2 = ellipse, 4 = rounded square, 1 = diamond; rx=ry=0 gives a sharp tip. (axis z: rx = X width, ry = Y height; axis y: rx = X, ry = Z; axis x: rx = Z, ry = Y.) Change size, position and shape from section to section to sculpt bodies, torsos, limbs, bottles, horns, hulls. ADVANCED FORM: "rings": [ring0, ring1, ...], each ring an array of [x,y,z] points, ALL rings with the same point count, ordered around the section. Fuselages, fish, torsos, limbs, bottles, horns, hulls. Change ring size/shape/position along the body for organic form. Optional "closed" (default true, rings wrap), "capStart"/"capEnd" (default true).
+3. "tube": variable-radius pipe along a smooth curve. "path": [[x,y,z],...] (spline control points), "rad": number OR array of radii spread evenly along the path (e.g. [0.3,0.2,0.05] tapers to a tip), "seg": sides (default 12), "segs": length subdivisions, "closed": bool. Tentacles, tails, branches, cables, horns, necks, ribs, handles.
+4. "lathe": revolve a profile. "profile": [[radius,y],...] bottom to top, "seg": sides (default 32). Vases, goblets, towers, bottles, wheels, domes, lamps, chess pieces.
+5. "extrude": "shape": [[x,y],...] outline (counter-clockwise), optional "holes": [[[x,y],...],...], "depth": thickness, "bevel": bevel size (0 = sharp), "curve": curve detail. Lies in the XY plane, centred on z. Gears, signs, swords, wings, plates, letters, silhouettes.
+6. "surface": parametric grid. "grid": rows of points, each row same length: [[[x,y,z],...],...]; "closeU": true wraps each row. Sails, cloth, terrain, capes, petals, fins, canopy membranes.
 
-            <div class="flex-1 p-4 flex flex-col overflow-hidden bg-slate-900">
-                <div class="flex items-center justify-between mb-2">
-                    <label class="text-xs font-semibold text-slate-300 uppercase tracking-wider flex items-center space-x-1.5">
-                        <i class="fa-solid fa-wand-magic-sparkles text-indigo-400"></i>
-                        <span>2. Copy Prompt for AI</span>
-                    </label>
-                    <button onclick="copyMasterPrompt()" id="copyBtn" class="px-2.5 py-1 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded font-medium transition-all shadow-md shadow-indigo-600/20 flex items-center space-x-1">
-                        <i class="fa-regular fa-copy"></i>
-                        <span>Copy Prompt</span>
-                    </button>
-                </div>
-                <div class="flex-1 relative rounded-lg border border-slate-800 bg-slate-950 overflow-hidden">
-                    <textarea id="generatedPromptText" readonly class="w-full h-full bg-transparent p-3 text-[11px] font-mono text-slate-400 leading-relaxed resize-none focus:outline-none select-all"></textarea>
-                </div>
-            </div>
+PRIMITIVES still exist for quick use: box (size [w,h,d]), sphere (rad), cylinder (radTop,radBot,h,seg), cone (rad,h), torus/torusKnot (rad,tube), capsule (rad,h), ring (radInner,radOuter), plane (size), dodecahedron/icosahedron/octahedron/tetrahedron (rad). Prefer custom geometry whenever shape matters.
 
-            <div class="p-4 border-t border-slate-800 bg-slate-950/80">
-                <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider mb-2 flex items-center justify-between">
-                    <span>3. Paste AI Commands JSON</span>
-                    <span class="text-[10px] text-slate-500">Auto-Parses</span>
-                </label>
-                <textarea id="aiJsonInput" rows="4"
-                    placeholder='Paste a JSON array, e.g. [{ "type": "torusKnot", "p": [0,1,0], "c": "#00ffff" }]'
-                    class="w-full bg-slate-900 border border-slate-700 rounded-lg p-2.5 text-xs text-slate-200 placeholder-slate-600 font-mono focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 resize-none transition-all"></textarea>
+EXAMPLES
+Vase: {"type":"lathe","id":"vase","profile":[[0,0],[0.5,0],[0.7,0.4],[0.35,1.1],[0.3,1.5],[0.45,1.8]],"c":"#38bdf8","metal":0.3,"rough":0.2}
+Tail: {"type":"tube","id":"tail","path":[[0,1,0],[0,1.2,-1],[0.3,1.8,-2],[0,2.6,-2.4]],"rad":[0.3,0.2,0.05],"c":"#f59e0b"}
+Fish body: {"type":"loft","id":"body","rings":[[[0,0,-1],[0,0,-1],[0,0,-1],[0,0,-1]],[[0.4,1,0],[0,1.5,0],[-0.4,1,0],[0,0.5,0]],[[0,1,1],[0,1,1],[0,1,1],[0,1,1]]],"c":"#fb923c"}
+Fish body (sections): {"type":"loft","id":"body","axis":"z","n":16,"sections":[{"p":[0,1,-1.6],"rx":0,"ry":0},{"p":[0,1,-0.8],"rx":0.45,"ry":0.55},{"p":[0,1,0.4],"rx":0.35,"ry":0.45},{"p":[0,1,1.6],"rx":0.05,"ry":0.2}],"mat":"plastic","c":"#fb923c"}
+Spokes: {"type":"box","id":"spoke","size":[0.1,0.1,1],"p":[0,1,0.6],"radial":{"n":8,"axis":"y"},"mat":"steel"}
+Fin (mirrored): {"type":"mesh","id":"fin","verts":[[0.4,1,0],[1.6,1.4,-0.3],[1.2,0.5,-0.8],[0.4,0.9,-0.6]],"faces":[[0,1,2,3]],"mirror":"x","c":"#fdba74","smooth":false}
 
-                <button onclick="parseAndExecute()" class="w-full mt-3 py-2.5 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-500 hover:to-purple-500 text-white font-semibold text-xs rounded-lg shadow-lg shadow-indigo-600/25 transition-all flex items-center justify-center space-x-2">
-                    <i class="fa-solid fa-play"></i>
-                    <span>Execute Commands on Canvas</span>
-                </button>
-            </div>
-        </aside>
+RESEARCH & QUALITY PROCESS (mandatory, do all of it BEFORE writing the final JSON; use your reasoning/thinking space, and web search if you have it):
+A. RESEARCH FIRST. Study the subject properly. Recall or look up real references: how professional artists and well-made 3D models of this subject are constructed, real-world proportions and measurements, anatomy or mechanical structure, characteristic silhouette, materials, colours and surface details. List the 5-10 features that make this subject instantly recognisable and make sure every one is modelled.
+B. TAKE YOUR TIME. Do not rush to the first workable answer. Plan the full parts list (primary masses, secondary forms, tertiary detail, accents) with approximate coordinates and sizes before you write any vertices. Quality and completeness matter far more than speed or brevity. A finished model normally has dozens of objects, often many more.
+C. BUILD. Use the right tool for each part (loft/tube/lathe/mesh/subdiv/extrude/surface), custom geometry wherever shape matters, repeat/radial/mirror for patterns and symmetry.
+D. AUDIT EVERY PART when finished, one object at a time, and fix what you find: Is it the right size relative to the whole? Is it positioned correctly and actually attached (no gaps, no floating pieces, no unintended intersections)? Is the silhouette correct from the front, side, top and 3/4 view? Is any part missing, duplicated, flipped, mirrored the wrong way, upside down or facing the wrong direction? Are index numbers, ring counts and arrays valid? Does the colour and material fit the real subject, with contrast and variation? Is there enough small detail (edges, seams, panels, spikes, fasteners, texture via displace)? Is the model sitting on the ground with min y near 0?
+E. IMPROVE. Replace any weak, blocky or generic part with a better one, add missing detail, then audit again. Repeat until you cannot find any further improvement.
+F. DELIVER. Only after A-E, output the final corrected JSON array and nothing else (all research, planning and analysis stays in your reasoning, never in the output).
 
-        <!-- Right Column: 3D Viewport -->
-        <section class="flex-1 relative bg-slate-950 flex flex-col min-w-0">
-            <div id="canvasContainer" class="w-full h-full relative cursor-grab active:cursor-grabbing"></div>
-
-            <div class="absolute top-4 right-4 flex flex-col space-y-2 z-10">
-                <button onclick="resetCamera()" class="p-2.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 rounded-lg text-slate-300 hover:text-white backdrop-blur transition-all shadow-lg" title="Reset Camera">
-                    <i class="fa-solid fa-arrows-to-eye"></i>
-                </button>
-                <button onclick="toggleGrid()" class="p-2.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 rounded-lg text-slate-300 hover:text-white backdrop-blur transition-all shadow-lg" title="Toggle Grid Floor">
-                    <i class="fa-solid fa-border-all"></i>
-                </button>
-                <button onclick="toggleWireframe()" class="p-2.5 bg-slate-900/80 hover:bg-slate-800 border border-slate-700/80 rounded-lg text-slate-300 hover:text-white backdrop-blur transition-all shadow-lg" title="Toggle Wireframe Mode">
-                    <i class="fa-solid fa-vector-square"></i>
-                </button>
-            </div>
-
-            <div id="inspectorBanner" class="absolute bottom-4 left-4 right-4 bg-slate-900/90 backdrop-blur border border-slate-800 rounded-lg p-3 text-xs text-slate-300 flex items-center justify-between shadow-xl hidden z-10">
-                <div class="flex items-center space-x-3">
-                    <span id="inspectColorBadge" class="w-4 h-4 rounded-full border border-white/20 inline-block"></span>
-                    <div>
-                        <span class="font-bold text-slate-100" id="inspectName">Object</span>
-                        <span class="text-slate-400 text-[11px] ml-2 font-mono" id="inspectDetails">Pos: [0, 0, 0]</span>
-                    </div>
-                </div>
-                <button onclick="hideInspector()" class="text-slate-400 hover:text-white p-1">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
-            </div>
-
-            <div id="toast" class="absolute top-4 left-4 bg-indigo-600/90 text-white text-xs px-3.5 py-2 rounded-lg backdrop-blur shadow-xl transition-all duration-300 opacity-0 pointer-events-none transform -translate-y-2 z-20 flex items-center space-x-2">
-                <i class="fa-solid fa-circle-check" id="toastIcon"></i>
-                <span id="toastMsg">Ready</span>
-            </div>
-        </section>
-    </main>
-
-    <script>
-        // ------------------------------------------------------------
-        // Three.js scene state
-        // ------------------------------------------------------------
-        let scene, camera, renderer, controls;
-        const objectsMap = new Map();
-        let gridHelper;
-        let isWireframe = false;
-        const raycaster = new THREE.Raycaster();
-        const mouse = new THREE.Vector2();
-
-        // ------------------------------------------------------------
-        // Prompt template
-        // ------------------------------------------------------------
-        const BASE_SYSTEM_PROMPT = `You are an elite 3D Master Architect and Senior Technical Artist. Output ONLY a valid JSON array of 3D primitive objects to build the user's request with expressive geometry, rich structural depth, and strong spatial composition. Do not include explanations or Markdown fences. please dont make the models primitive and make sure that you dont make errors use your full potential and research 3d models and make your own and take your time and make it look good, and analyse the model fully after you make it and fix everything wrong and make it better
-
-PRIMITIVES & GEOMETRY TYPES:
-- "type": "box" | "sphere" | "cylinder" | "cone" | "torus" | "torusKnot" | "capsule" | "dodecahedron" | "icosahedron" | "octahedron" | "tetrahedron" | "ring" | "plane"
-
-EASY SHORTHAND & EXPRESSIVE PROPERTIES:
-- "p" or "pos": [x, y, z] (position; place the model on or above the ground where possible)
-- "r" or "rot": [rx, ry, rz] (rotation angles in radians)
-- "s" or "scale": [sx, sy, sz] (scale multiplier)
-- "id": optional unique object name
-
-FLEXIBLE SIZING:
-- "box": "size": [width, height, depth]
-- "sphere" / "dodecahedron" / "icosahedron" / "octahedron" / "tetrahedron": "rad": radius
-- "cylinder" / "cone": "radTop": top radius, "radBot": bottom radius, "h": height, "seg": radial segments
-- "torus" / "torusKnot": "rad": radius, "tube": tube radius
-- "capsule": "rad": radius, "h": cylindrical body height
-- "ring": "radInner": inner radius, "radOuter": outer radius
-- "plane": "size": [width, height]
-
-PBR MATERIAL ATTRIBUTES:
-- "c" or "col": color hex code, e.g. "#1e293b", "#3b82f6", "#f59e0b"
-- "rough": roughness from 0.0 to 1.0
-- "metal": metalness from 0.0 to 1.0
-- "trans": transmission from 0.0 to 1.0
-- "opac": opacity from 0.0 to 1.0
-- "emiss": emissive hex color
-- "emissInt": emissive intensity
-- "wire": true / false
-
-DESIGN RULES:
-1. Deconstruct the concept into primary forms, secondary structures, small details, and accents.
-2. Use material contrast: combine metallic structures, matte parts, and accent colors.
-3. Keep proportions balanced and avoid placing the whole model below Y = 0.
-4. Return ONLY a valid JSON array of objects.
+WORKFLOW: 1) Plan major forms, proportions and silhouette. 2) Build large forms with loft/tube/lathe. 3) Add hand-built mesh details (plates, fins, spikes, edges). 4) Add small accents and emissive parts. 5) Review coordinates mentally for gaps, floating or intersecting parts, flipped proportions, and fix them before answering. 6) Use material contrast and colour variation. Be bold, detailed and original. Ring/row point counts may differ (the engine resamples), but keep them consistent when you can. If the user pastes a SCENE REPORT, treat it as feedback: fix floating or disconnected parts, wrong sizes and listed errors, then return the FULL corrected JSON array. Output ONLY the JSON array.
 
 USER REQUEST:`;
 
-        // ------------------------------------------------------------
-        // Initialize Three.js engine
-        // ------------------------------------------------------------
-        window.addEventListener('load', () => {
-            initEngine();
-            setupEventListeners();
-            updatePrompt();
-            showToast('Engine initialized. Canvas ready!', 'fa-circle-check');
-        });
+window.addEventListener('load', () => {
+  initEngine();
+  document.getElementById('userRequestInput').addEventListener('input', updatePrompt);
+  document.getElementById('canvasContainer').addEventListener('click', onCanvasClick);
+  updatePrompt();
+  showToast('Mesh engine ready');
+});
 
-        function initEngine() {
-            const container = document.getElementById('canvasContainer');
+function initEngine() {
+  const c = document.getElementById('canvasContainer');
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(0x090d16);
+  scene.fog = new THREE.FogExp2(0x090d16, 0.02);
+  camera = new THREE.PerspectiveCamera(45, Math.max(c.clientWidth,1)/Math.max(c.clientHeight,1), 0.1, 1000);
+  camera.position.set(8, 6, 10);
+  renderer = new THREE.WebGLRenderer({ antialias: true });
+  renderer.setSize(c.clientWidth, c.clientHeight);
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.2;
+  c.appendChild(renderer.domElement);
+  controls = new THREE.OrbitControls(camera, renderer.domElement);
+  controls.enableDamping = true;
+  scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+  const main = new THREE.DirectionalLight(0xffffff, 1.2);
+  main.position.set(10, 20, 15); main.castShadow = true;
+  main.shadow.mapSize.set(2048, 2048); main.shadow.bias = -0.0001;
+  main.shadow.camera.left = main.shadow.camera.bottom = -15; main.shadow.camera.right = main.shadow.camera.top = 15;
+  scene.add(main);
+  const fill = new THREE.DirectionalLight(0x818cf8, 0.5); fill.position.set(-10, 10, -10); scene.add(fill);
+  const rim = new THREE.PointLight(0xc084fc, 0.8, 30); rim.position.set(0, 5, -8); scene.add(rim);
+  gridHelper = new THREE.GridHelper(30, 30, 0x475569, 0x1e293b); scene.add(gridHelper);
+  (function loop(){ requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+  window.addEventListener('resize', () => {
+    camera.aspect = Math.max(c.clientWidth,1)/Math.max(c.clientHeight,1);
+    camera.updateProjectionMatrix(); renderer.setSize(c.clientWidth, c.clientHeight);
+  });
+}
 
-            scene = new THREE.Scene();
-            scene.background = new THREE.Color(0x090d16);
-            scene.fog = new THREE.FogExp2(0x090d16, 0.025);
+function updatePrompt() {
+  const r = document.getElementById('userRequestInput').value.trim();
+  document.getElementById('generatedPromptText').value = BASE_SYSTEM_PROMPT + '\n' + (r || '[Describe your 3D model here]');
+}
 
-            camera = new THREE.PerspectiveCamera(
-                45,
-                Math.max(container.clientWidth, 1) / Math.max(container.clientHeight, 1),
-                0.1,
-                1000
-            );
-            camera.position.set(8, 6, 10);
+async function copyMasterPrompt() {
+  const area = document.getElementById('generatedPromptText'), btn = document.getElementById('copyBtn');
+  let ok = false;
+  try {
+    if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(area.value); ok = true; }
+    else { area.focus(); area.select(); ok = document.execCommand('copy'); }
+  } catch (e) {}
+  if (ok) { btn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!'; showToast('Prompt copied!', 'fa-copy', 'bg-emerald-600'); }
+  else { area.focus(); area.select(); showToast('Press Ctrl+C / Cmd+C to copy.', 'fa-triangle-exclamation', 'bg-amber-600'); }
+  setTimeout(() => btn.innerHTML = '<i class="fa-regular fa-copy"></i> Copy Prompt', 2200);
+}
 
-            renderer = new THREE.WebGLRenderer({
-                antialias: true,
-                powerPreference: 'high-performance'
-            });
-            renderer.setSize(container.clientWidth, container.clientHeight);
-            renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
-            renderer.shadowMap.enabled = true;
-            renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-            renderer.toneMapping = THREE.ACESFilmicToneMapping;
-            renderer.toneMappingExposure = 1.2;
-            container.appendChild(renderer.domElement);
+/* ---------------- Geometry engine ---------------- */
+function hash3(x, y, z) { const s = Math.sin(x*127.1 + y*311.7 + z*74.7) * 43758.5453; return s - Math.floor(s); }
+function vnoise(x, y, z) {
+  const xi = Math.floor(x), yi = Math.floor(y), zi = Math.floor(z);
+  const u = t => t*t*(3-2*t), l = (a,b,t) => a + (b-a)*t;
+  const fx = u(x-xi), fy = u(y-yi), fz = u(z-zi), h = (a,b,c) => hash3(xi+a, yi+b, zi+c);
+  return l(l(l(h(0,0,0),h(1,0,0),fx), l(h(0,1,0),h(1,1,0),fx), fy),
+           l(l(h(0,0,1),h(1,0,1),fx), l(h(0,1,1),h(1,1,1),fx), fy), fz) * 2 - 1;
+}
 
-            controls = new THREE.OrbitControls(camera, renderer.domElement);
-            controls.enableDamping = true;
-            controls.dampingFactor = 0.05;
-            controls.maxPolarAngle = Math.PI / 2 + 0.05;
+// Rows of points -> indexed geometry data (optionally wrapped and capped).
+function gridData(rows, closed, capS, capE) {
+  const C0 = Math.max(...rows.map(r => r.length));
+  rows = rows.map(r => r.length === C0 ? r : resample(r, C0, closed));
+  const R = rows.length, C = C0, pos = [], idx = [];
+  rows.forEach(r => r.forEach(p => { if (!p.every(Number.isFinite)) throw new Error('Non-numeric point in rings/grid.'); pos.push(+p[0], +p[1], +p[2]); }));
+  const cc = closed ? C : C - 1;
+  for (let i = 0; i < R - 1; i++) for (let j = 0; j < cc; j++) {
+    const a = i*C + j, b = i*C + (j+1)%C, c = (i+1)*C + (j+1)%C, d = (i+1)*C + j;
+    idx.push(a, b, c, a, c, d);
+  }
+  const cap = (ri, flip) => {
+    const base = pos.length / 3; let cx = 0, cy = 0, cz = 0;
+    rows[ri].forEach(p => { pos.push(+p[0], +p[1], +p[2]); cx += p[0]; cy += p[1]; cz += p[2]; });
+    const ctr = pos.length / 3; pos.push(cx/C, cy/C, cz/C);
+    for (let j = 0; j < C; j++) { const a = base + j, b = base + (j+1)%C; flip ? idx.push(ctr, b, a) : idx.push(ctr, a, b); }
+  };
+  if (closed && capS !== false && R > 1) cap(0, false);
+  if (closed && capE !== false && R > 1) cap(R-1, true);
+  return { pos, idx };
+}
 
-            scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+function ringPts(r, y, seg) {
+  const pts = [];
+  for (let j = 0; j < seg; j++) { const a = j / seg * Math.PI * 2; pts.push([r*Math.cos(a), y, r*Math.sin(a)]); }
+  return pts;
+}
 
-            const mainLight = new THREE.DirectionalLight(0xffffff, 1.2);
-            mainLight.position.set(10, 20, 15);
-            mainLight.castShadow = true;
-            mainLight.shadow.mapSize.width = 2048;
-            mainLight.shadow.mapSize.height = 2048;
-            mainLight.shadow.bias = -0.0001;
-            scene.add(mainLight);
+function radAt(rad, t) {
+  if (!Array.isArray(rad)) return rad === undefined ? 0.1 : rad;
+  if (rad.length === 1) return rad[0];
+  const f = t * (rad.length - 1), i = Math.min(Math.floor(f), rad.length - 2);
+  return rad[i] + (rad[i+1] - rad[i]) * (f - i);
+}
 
-            const fillLight = new THREE.DirectionalLight(0x818cf8, 0.5);
-            fillLight.position.set(-10, 10, -10);
-            scene.add(fillLight);
+const MATS = {
+  gold: { c: '#d4af37', metal: 1, rough: 0.25 }, steel: { c: '#9ca3af', metal: 1, rough: 0.35 },
+  chrome: { c: '#e5e7eb', metal: 1, rough: 0.05 }, copper: { c: '#b87333', metal: 1, rough: 0.3 },
+  glass: { c: '#bfe9ff', trans: 0.95, opac: 0.5, rough: 0.05, metal: 0 }, rubber: { c: '#1f2937', rough: 0.9, metal: 0 },
+  stone: { c: '#6b7280', rough: 0.95, metal: 0 }, wood: { c: '#8b5a2b', rough: 0.7, metal: 0 },
+  skin: { c: '#e8b796', rough: 0.6, metal: 0 }, plastic: { rough: 0.4, metal: 0 },
+  neon: { c: '#22d3ee', emiss: '#22d3ee', emissInt: 2, rough: 0.3, metal: 0 }
+};
+let lastErrors = [];
+const groups = new Map();
 
-            const rimLight = new THREE.PointLight(0xc084fc, 0.8, 20);
-            rimLight.position.set(0, 5, -8);
-            scene.add(rimLight);
+function resample(r, N, closed) {
+  const L = r.length, out = [];
+  for (let i = 0; i < N; i++) {
+    const t = closed ? i / N * L : i / (N - 1) * (L - 1), i0 = Math.floor(t), i1 = closed ? (i0 + 1) % L : Math.min(i0 + 1, L - 1), f = t - i0;
+    out.push([0, 1, 2].map(k => r[i0 % L][k] + (r[i1][k] - r[i0 % L][k]) * f));
+  }
+  return out;
+}
 
-            gridHelper = new THREE.GridHelper(30, 30, 0x475569, 0x1e293b);
-            gridHelper.position.y = 0;
-            scene.add(gridHelper);
+function sectionsToRings(cmd) {
+  const ax = cmd.axis || 'z', n = cmd.n || 16;
+  const U = { z: [1,0,0], y: [1,0,0], x: [0,0,1] }[ax] || [1,0,0], V = { z: [0,1,0], y: [0,0,1], x: [0,1,0] }[ax] || [0,1,0];
+  return cmd.sections.map(s => {
+    const rx = s.rx ?? s.r ?? 0.5, ry = s.ry ?? rx, pw = 2 / (s.pow || 2), rot = s.rot || 0, o = s.off || [0,0], p = s.p || [0,0,0], pts = [];
+    for (let j = 0; j < n; j++) {
+      const a = j / n * Math.PI * 2, c = Math.cos(a), sn = Math.sin(a);
+      let x = rx * Math.sign(c) * Math.pow(Math.abs(c), pw), y = ry * Math.sign(sn) * Math.pow(Math.abs(sn), pw);
+      const xr = x * Math.cos(rot) - y * Math.sin(rot), yr = x * Math.sin(rot) + y * Math.cos(rot);
+      x = xr + o[0]; y = yr + o[1];
+      pts.push([0,1,2].map(i => p[i] + U[i] * x + V[i] * y));
+    }
+    return pts;
+  });
+}
 
-            function animate() {
-                requestAnimationFrame(animate);
-                controls.update();
-                renderer.render(scene, camera);
-            }
-            animate();
+// Loop subdivision on an indexed triangle mesh (boundary-aware).
+function loopSubdivide(pos, idx, levels) {
+  for (let L = 0; L < levels && idx.length < 300000; L++) {
+    const nv = pos.length / 3, edges = new Map(), nbr = Array.from({ length: nv }, () => new Set()), bnd = Array.from({ length: nv }, () => new Set());
+    const key = (a, b) => a < b ? a * nv + b : b * nv + a;
+    for (let t = 0; t < idx.length; t += 3) for (let k = 0; k < 3; k++) {
+      const a = idx[t+k], b = idx[t+(k+1)%3], c = idx[t+(k+2)%3], e = key(a, b);
+      nbr[a].add(b); nbr[b].add(a);
+      let r = edges.get(e); if (!r) { r = { a, b, opp: [] }; edges.set(e, r); } r.opp.push(c);
+    }
+    edges.forEach(r => { if (r.opp.length === 1) { bnd[r.a].add(r.b); bnd[r.b].add(r.a); } });
+    const np = [];
+    for (let i = 0; i < nv; i++) for (let k = 0; k < 3; k++) {
+      const v = pos[i*3+k], B = [...bnd[i]], N = [...nbr[i]];
+      if (B.length === 2) np.push(0.75 * v + 0.125 * (pos[B[0]*3+k] + pos[B[1]*3+k]));
+      else if (B.length) np.push(v);
+      else { const n = N.length, be = n === 3 ? 3/16 : 3/(8*n); np.push((1 - n*be) * v + be * N.reduce((q, j) => q + pos[j*3+k], 0)); }
+    }
+    let m = nv;
+    edges.forEach(r => {
+      r.m = m++;
+      for (let k = 0; k < 3; k++) {
+        const ab = pos[r.a*3+k] + pos[r.b*3+k];
+        np.push(r.opp.length === 2 ? 0.375 * ab + 0.125 * (pos[r.opp[0]*3+k] + pos[r.opp[1]*3+k]) : 0.5 * ab);
+      }
+    });
+    const ni = [];
+    for (let t = 0; t < idx.length; t += 3) {
+      const a = idx[t], b = idx[t+1], c = idx[t+2], ab = edges.get(key(a, b)).m, bc = edges.get(key(b, c)).m, ca = edges.get(key(c, a)).m;
+      ni.push(a, ab, ca, b, bc, ab, c, ca, bc, ab, bc, ca);
+    }
+    pos = np; idx = ni;
+  }
+  return { pos, idx };
+}
 
-            window.addEventListener('resize', onWindowResize);
+function mirrorMesh(m, axis) {
+  const k = { x: 0, y: 1, z: 2 }[axis];
+  if (k === undefined) throw new Error('mirror must be "x", "y" or "z".');
+  const c = m.clone(), p = c.position.toArray(), s = c.scale.toArray(), r = [c.rotation.x, c.rotation.y, c.rotation.z];
+  p[k] *= -1; s[k] *= -1; [0,1,2].filter(i => i !== k).forEach(i => r[i] *= -1);
+  c.position.fromArray(p); c.scale.fromArray(s); c.rotation.set(r[0], r[1], r[2]);
+  return c;
+}
+
+function instances(cmd) {
+  const base = buildMesh(cmd); let list = [base];
+  const rp = cmd.repeat, rd = cmd.radial;
+  if (rp) {
+    const n = Math.min(rp.n || 1, 500), o = rp.offset || [0,0,0], r = rp.rot || [0,0,0], sc = rp.scale || [1,1,1];
+    for (let k = 1; k < n; k++) {
+      const m = base.clone();
+      m.position.add(new THREE.Vector3(o[0]*k, o[1]*k, o[2]*k));
+      m.rotation.set(base.rotation.x + r[0]*k, base.rotation.y + r[1]*k, base.rotation.z + r[2]*k);
+      m.scale.set(base.scale.x * Math.pow(sc[0], k), base.scale.y * Math.pow(sc[1], k), base.scale.z * Math.pow(sc[2], k));
+      list.push(m);
+    }
+  }
+  if (rd) {
+    const n = Math.min(rd.n || 1, 500), ax = new THREE.Vector3(...(rd.axis === 'x' ? [1,0,0] : rd.axis === 'z' ? [0,0,1] : [0,1,0])), src = list; list = [];
+    for (let k = 0; k < n; k++) {
+      const q = new THREE.Quaternion().setFromAxisAngle(ax, k * 2 * Math.PI / n);
+      src.forEach(s => { const m = s.clone(); m.position.applyQuaternion(q); m.quaternion.premultiply(q); list.push(m); });
+    }
+  }
+  if (cmd.mirror) list = list.concat(list.map(m => mirrorMesh(m, String(cmd.mirror).toLowerCase())));
+  return list;
+}
+
+function removeId(id) { (groups.get(id) || []).forEach(removeKey); groups.delete(id); }
+
+function copyText(t) {
+  if (navigator.clipboard && window.isSecureContext) return navigator.clipboard.writeText(t);
+  const a = document.createElement('textarea'); a.value = t; document.body.appendChild(a); a.select(); document.execCommand('copy'); a.remove();
+  return Promise.resolve();
+}
+
+function copySceneReport() {
+  if (!objectsMap.size && !lastErrors.length) return showToast('Nothing to report yet', 'fa-triangle-exclamation', 'bg-amber-600');
+  const f = v => `${v.x.toFixed(2)},${v.y.toFixed(2)},${v.z.toFixed(2)}`, box = new THREE.Box3(), items = [];
+  objectsMap.forEach((m, k) => { const b = new THREE.Box3().setFromObject(m); box.union(b); items.push({ k, b, t: m.userData.type }); });
+  const L = ['SCENE REPORT', 'Objects: ' + objectsMap.size + ', triangles: ' + document.getElementById('polyCount').innerText];
+  if (items.length) {
+    const sz = box.getSize(new THREE.Vector3());
+    L.push('Overall size (x,y,z): ' + f(sz), 'Bounds min: ' + f(box.min) + ' max: ' + f(box.max));
+    if (box.min.y < -0.05) L.push('WARNING: model goes below the ground (min y ' + box.min.y.toFixed(2) + ').');
+    if (box.min.y > 0.3) L.push('WARNING: model floats above the ground (min y ' + box.min.y.toFixed(2) + ').');
+    if (Math.max(sz.x, sz.y, sz.z) > 12) L.push('WARNING: model is larger than 10 units.');
+    if (items.length <= 400) items.forEach(a => { const e = a.b.clone().expandByScalar(0.05); if (!items.some(o => o !== a && e.intersectsBox(o.b))) L.push('Possibly disconnected part: ' + a.k); });
+    L.push('Objects:'); items.forEach(a => L.push(`- ${a.k} [${a.t}] min(${f(a.b.min)}) max(${f(a.b.max)})`));
+  }
+  if (lastErrors.length) { L.push('ERRORS:'); lastErrors.forEach(e => L.push('- ' + e)); }
+  L.push('', 'Critique the silhouette, proportions and detail, fix every problem above, and return the FULL corrected JSON array only.');
+  copyText(L.join('\n')).then(() => showToast('Report copied: paste it to the AI', 'fa-clipboard-check', 'bg-emerald-600'));
+}
+
+function finish(data, cmd, smoothDefault) {
+  if (!data.pos.length || !data.idx.length) throw new Error('Mesh has no geometry.');
+  if (cmd.subdiv) data = loopSubdivide(data.pos, data.idx, Math.min(cmd.subdiv | 0, 3));
+  let g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(data.pos, 3));
+  g.setIndex(data.idx);
+  const d = cmd.displace;
+  if (d) {
+    g.computeBoundingBox();
+    const ctr = g.boundingBox.getCenter(new THREE.Vector3()), P = g.attributes.position;
+    const amp = d.amp ?? 0.1, f = d.freq ?? 2, s = d.seed ?? 0, v = new THREE.Vector3();
+    for (let i = 0; i < P.count; i++) {
+      v.fromBufferAttribute(P, i);
+      const n = (vnoise(v.x*f+s, v.y*f+s, v.z*f+s) + 0.5*vnoise(v.x*f*2+s, v.y*f*2+s, v.z*f*2+s)) * amp;
+      if (d.mode === 'y') v.y += n; else v.add(v.clone().sub(ctr).normalize().multiplyScalar(n));
+      P.setXYZ(i, v.x, v.y, v.z);
+    }
+  }
+  const smooth = cmd.smooth !== undefined ? cmd.smooth : smoothDefault;
+  if (!smooth) g = g.toNonIndexed();
+  g.computeVertexNormals();
+  g.setAttribute('uv', new THREE.Float32BufferAttribute(new Float32Array(g.attributes.position.count * 2), 2));
+  return g;
+}
+
+function buildGeometry(cmd) {
+  const type = String(cmd.type || 'box').toLowerCase();
+  switch (type) {
+    case 'mesh': {
+      if (!Array.isArray(cmd.verts) || !Array.isArray(cmd.faces)) throw new Error('mesh needs "verts" and "faces".');
+      const pos = [], idx = [], n = cmd.verts.length;
+      cmd.verts.forEach(v => { if (!Array.isArray(v) || v.length < 3 || !v.every(Number.isFinite)) throw new Error('Bad vertex in "' + (cmd.id||'mesh') + '".'); pos.push(v[0], v[1], v[2]); });
+      cmd.faces.forEach(f => {
+        if (!Array.isArray(f) || f.length < 3 || f.some(i => !Number.isInteger(i) || i < 0 || i >= n)) return;
+        for (let k = 1; k < f.length - 1; k++) idx.push(f[0], f[k], f[k+1]);
+      });
+      return finish({ pos, idx }, cmd, false);
+    }
+    case 'loft':
+    { const rings = Array.isArray(cmd.sections) ? sectionsToRings(cmd) : cmd.rings;
+      if (!Array.isArray(rings) || rings.length < 2) throw new Error('loft needs 2+ "sections" or "rings".');
+      return finish(gridData(rings, cmd.closed !== false, cmd.capStart, cmd.capEnd), cmd, true); }
+    case 'surface':
+      if (!Array.isArray(cmd.grid) || cmd.grid.length < 2) throw new Error('surface needs a "grid".');
+      return finish(gridData(cmd.grid, !!cmd.closeU, false, false), cmd, true);
+    case 'lathe': {
+      if (!Array.isArray(cmd.profile) || cmd.profile.length < 2) throw new Error('lathe needs a "profile".');
+      const seg = cmd.seg || 32;
+      return finish(gridData(cmd.profile.map(pt => ringPts(pt[0], pt[1], seg)), true, false, false), cmd, true);
+    }
+    case 'tube': {
+      if (!Array.isArray(cmd.path) || cmd.path.length < 2) throw new Error('tube needs a "path".');
+      const curve = new THREE.CatmullRomCurve3(cmd.path.map(p => new THREE.Vector3(p[0], p[1], p[2])), !!cmd.closed, 'centripetal');
+      const n = cmd.segs || Math.max(8, cmd.path.length * 6), seg = cmd.seg || 12;
+      const fr = curve.computeFrenetFrames(n, !!cmd.closed), rows = [];
+      for (let i = 0; i <= n; i++) {
+        const t = i / n, P = curve.getPointAt(t), r = radAt(cmd.rad, t), ring = [];
+        for (let j = 0; j < seg; j++) {
+          const a = j / seg * Math.PI * 2, cs = Math.cos(a) * r, sn = Math.sin(a) * r;
+          ring.push([P.x + fr.normals[i].x*cs + fr.binormals[i].x*sn, P.y + fr.normals[i].y*cs + fr.binormals[i].y*sn, P.z + fr.normals[i].z*cs + fr.binormals[i].z*sn]);
         }
-
-        function onWindowResize() {
-            const container = document.getElementById('canvasContainer');
-            if (!container || !camera || !renderer) return;
-
-            camera.aspect = Math.max(container.clientWidth, 1) / Math.max(container.clientHeight, 1);
-            camera.updateProjectionMatrix();
-            renderer.setSize(container.clientWidth, container.clientHeight);
-        }
-
-        function setupEventListeners() {
-            document.getElementById('userRequestInput').addEventListener('input', updatePrompt);
-            document.getElementById('canvasContainer').addEventListener('click', onCanvasClick);
-        }
-
-        function updatePrompt() {
-            const userReq = document.getElementById('userRequestInput').value.trim();
-            const finalPrompt = BASE_SYSTEM_PROMPT + '\n' + (userReq || '[Describe your 3D model here]');
-            document.getElementById('generatedPromptText').value = finalPrompt;
-        }
-
-        async function copyMasterPrompt() {
-            const copyArea = document.getElementById('generatedPromptText');
-            const copyBtn = document.getElementById('copyBtn');
-            const text = copyArea.value;
-            let success = false;
-
-            try {
-                if (navigator.clipboard && window.isSecureContext) {
-                    await navigator.clipboard.writeText(text);
-                    success = true;
-                } else {
-                    copyArea.focus();
-                    copyArea.select();
-                    success = document.execCommand('copy');
-                }
-            } catch (error) {
-                console.warn('Clipboard copy failed:', error);
-            }
-
-            if (success) {
-                copyBtn.innerHTML = '<i class="fa-solid fa-check"></i> <span>Copied!</span>';
-                showToast('System prompt copied to clipboard!', 'fa-copy', 'bg-emerald-600');
-            } else {
-                copyArea.focus();
-                copyArea.select();
-                showToast('Text selected. Press Ctrl+C / Cmd+C to copy.', 'fa-triangle-exclamation', 'bg-amber-600');
-            }
-
-            setTimeout(() => {
-                copyBtn.innerHTML = '<i class="fa-regular fa-copy"></i> <span>Copy Prompt</span>';
-            }, 2200);
-        }
-
-        // ------------------------------------------------------------
-        // JSON command parsing and object creation
-        // ------------------------------------------------------------
-        function parseAndExecute() {
-            const jsonInput = document.getElementById('aiJsonInput').value.trim();
-            if (!jsonInput) {
-                showToast('Please paste AI JSON commands first!', 'fa-triangle-exclamation', 'bg-amber-600');
-                return;
-            }
-
-            try {
-                let rawJson = jsonInput.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
-                const firstArray = rawJson.indexOf('[');
-                const lastArray = rawJson.lastIndexOf(']');
-                if (firstArray !== -1 && lastArray > firstArray) {
-                    rawJson = rawJson.slice(firstArray, lastArray + 1);
-                }
-
-                const commands = JSON.parse(rawJson);
-                if (!Array.isArray(commands)) {
-                    throw new Error('Command input must be a JSON array of objects.');
-                }
-
-                let executedCount = 0;
-                commands.forEach(command => {
-                    if (command && typeof command === 'object' && processCommand(command)) {
-                        executedCount++;
-                    }
-                });
-
-                updateStats();
-                showToast(`Successfully executed ${executedCount} 3D commands!`, 'fa-circle-check');
-            } catch (error) {
-                console.error(error);
-                showToast('JSON Syntax Error: ' + error.message, 'fa-circle-xmark', 'bg-red-600');
-            }
-        }
-
-        function disposeObjectResources(object) {
-            if (!object) return;
-            if (object.geometry) object.geometry.dispose();
-            if (Array.isArray(object.material)) {
-                object.material.forEach(material => material && material.dispose());
-            } else if (object.material) {
-                object.material.dispose();
-            }
-        }
-
-        function processCommand(cmd) {
-            const op = String(cmd.op || 'add').toLowerCase();
-            const id = cmd.id || ('obj_' + Math.random().toString(36).slice(2, 11));
-
-            if (op === 'clear') {
-                clearScene();
-                return true;
-            }
-
-            if (op === 'delete') {
-                if (!objectsMap.has(id)) return false;
-                const oldObject = objectsMap.get(id);
-                scene.remove(oldObject);
-                disposeObjectResources(oldObject);
-                objectsMap.delete(id);
-                return true;
-            }
-
-            if (op === 'add' || op === 'update' || !cmd.op) {
-                if (objectsMap.has(id)) {
-                    const oldObject = objectsMap.get(id);
-                    scene.remove(oldObject);
-                    disposeObjectResources(oldObject);
-                }
-
-                const mesh = createMeshFromCommand(cmd);
-                mesh.name = id;
-                mesh.userData = { ...cmd };
-                scene.add(mesh);
-                objectsMap.set(id, mesh);
-                return true;
-            }
-
-            return false;
-        }
-
-        function createCapsuleGeometry(radius, bodyHeight, radialSegments = 24) {
-            // A LatheGeometry capsule fallback works with Three.js r128.
-            const points = [];
-            const halfBody = Math.max(0, bodyHeight) / 2;
-            const steps = 8;
-
-            for (let i = 0; i <= steps; i++) {
-                const angle = -Math.PI / 2 + (Math.PI / 2) * (i / steps);
-                points.push(new THREE.Vector2(
-                    radius * Math.cos(angle),
-                    -halfBody + radius * Math.sin(angle)
-                ));
-            }
-            for (let i = 0; i <= steps; i++) {
-                const angle = (Math.PI / 2) * (i / steps);
-                points.push(new THREE.Vector2(
-                    radius * Math.cos(angle),
-                    halfBody + radius * Math.sin(angle)
-                ));
-            }
-
-            return new THREE.LatheGeometry(points, radialSegments);
-        }
-
-        function createMeshFromCommand(cmd) {
-            const type = String(cmd.type || 'box').toLowerCase();
-            let geometry;
-
-            const pos = cmd.p || cmd.pos || [0, 0, 0];
-            const rot = cmd.r || cmd.rot || [0, 0, 0];
-            const scale = cmd.s || cmd.scale || [1, 1, 1];
-
-            switch (type) {
-                case 'box':
-                case 'cube': {
-                    const size = cmd.size || [1, 1, 1];
-                    geometry = new THREE.BoxGeometry(size[0], size[1], size[2]);
-                    break;
-                }
-                case 'sphere': {
-                    const radius = cmd.rad || cmd.radius || 0.5;
-                    geometry = new THREE.SphereGeometry(radius, 32, 32);
-                    break;
-                }
-                case 'cylinder': {
-                    const radiusTop = cmd.radTop !== undefined ? cmd.radTop : (cmd.rad || 0.5);
-                    const radiusBottom = cmd.radBot !== undefined ? cmd.radBot : (cmd.rad || 0.5);
-                    const height = cmd.h || cmd.height || 1;
-                    geometry = new THREE.CylinderGeometry(radiusTop, radiusBottom, height, cmd.seg || 32);
-                    break;
-                }
-                case 'cone': {
-                    geometry = new THREE.ConeGeometry(cmd.rad || 0.5, cmd.h || 1, cmd.seg || 32);
-                    break;
-                }
-                case 'torus': {
-                    geometry = new THREE.TorusGeometry(cmd.rad || 0.5, cmd.tube || 0.15, 16, 100);
-                    break;
-                }
-                case 'torusknot':
-                case 'torus_knot': {
-                    geometry = new THREE.TorusKnotGeometry(cmd.rad || 0.5, cmd.tube || 0.15, 128, 32);
-                    break;
-                }
-                case 'dodecahedron':
-                    geometry = new THREE.DodecahedronGeometry(cmd.rad || 0.5);
-                    break;
-                case 'icosahedron':
-                    geometry = new THREE.IcosahedronGeometry(cmd.rad || 0.5);
-                    break;
-                case 'octahedron':
-                    geometry = new THREE.OctahedronGeometry(cmd.rad || 0.5);
-                    break;
-                case 'tetrahedron':
-                    geometry = new THREE.TetrahedronGeometry(cmd.rad || 0.5);
-                    break;
-                case 'ring':
-                    geometry = new THREE.RingGeometry(cmd.radInner || 0.2, cmd.radOuter || 0.5, 32);
-                    break;
-                case 'plane': {
-                    const planeSize = cmd.size || [1, 1];
-                    geometry = new THREE.PlaneGeometry(planeSize[0], planeSize[1]);
-                    break;
-                }
-                case 'capsule':
-                    geometry = createCapsuleGeometry(cmd.rad || 0.25, cmd.h || 0.5, cmd.seg || 24);
-                    break;
-                default:
-                    geometry = new THREE.BoxGeometry(1, 1, 1);
-            }
-
-            const color = cmd.c || cmd.col || cmd.color || '#818cf8';
-            const roughness = cmd.rough !== undefined ? cmd.rough : 0.3;
-            const metalness = cmd.metal !== undefined ? cmd.metal : 0.2;
-            const transmission = cmd.trans !== undefined ? cmd.trans : 0.0;
-            const opacity = cmd.opac !== undefined ? cmd.opac : (cmd.opacity !== undefined ? cmd.opacity : 1.0);
-
-            const material = new THREE.MeshPhysicalMaterial({
-                color: new THREE.Color(color),
-                roughness,
-                metalness,
-                transmission,
-                transparent: transmission > 0 || opacity < 1,
-                opacity,
-                wireframe: Boolean(cmd.wire) || isWireframe,
-                side: THREE.DoubleSide
-            });
-
-            if (cmd.emiss || cmd.emissive) {
-                material.emissive = new THREE.Color(cmd.emiss || cmd.emissive);
-                material.emissiveIntensity = cmd.emissInt !== undefined ? cmd.emissInt : 1.0;
-            }
-
-            const mesh = new THREE.Mesh(geometry, material);
-            mesh.position.set(pos[0] || 0, pos[1] || 0, pos[2] || 0);
-            mesh.rotation.set(rot[0] || 0, rot[1] || 0, rot[2] || 0);
-            mesh.scale.set(
-                scale[0] !== undefined ? scale[0] : 1,
-                scale[1] !== undefined ? scale[1] : 1,
-                scale[2] !== undefined ? scale[2] : 1
-            );
-            mesh.castShadow = true;
-            mesh.receiveShadow = true;
-            return mesh;
-        }
-
-        // ------------------------------------------------------------
-        // Selection / inspection
-        // ------------------------------------------------------------
-        function onCanvasClick(event) {
-            if (!renderer || !camera) return;
-            const rect = renderer.domElement.getBoundingClientRect();
-            mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
-            mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
-
-            raycaster.setFromCamera(mouse, camera);
-            const intersections = raycaster.intersectObjects(Array.from(objectsMap.values()), false);
-
-            if (intersections.length > 0) {
-                const hit = intersections[0].object;
-                const data = hit.userData || {};
-                const displayColor = data.c || data.col || data.color || '#818cf8';
-                document.getElementById('inspectName').innerText = `${data.type || 'Object'} (${hit.name})`;
-                document.getElementById('inspectDetails').innerText =
-                    `Pos: [${hit.position.x.toFixed(2)}, ${hit.position.y.toFixed(2)}, ${hit.position.z.toFixed(2)}] | Col: ${displayColor}`;
-                document.getElementById('inspectColorBadge').style.backgroundColor = displayColor;
-                document.getElementById('inspectorBanner').classList.remove('hidden');
-            }
-        }
-
-        function hideInspector() {
-            document.getElementById('inspectorBanner').classList.add('hidden');
-        }
-
-        // ------------------------------------------------------------
-        // Scene management / statistics / viewport controls
-        // ------------------------------------------------------------
-        function clearScene() {
-            objectsMap.forEach(mesh => {
-                scene.remove(mesh);
-                disposeObjectResources(mesh);
-            });
-            objectsMap.clear();
-            hideInspector();
-            updateStats();
-            showToast('Canvas cleared!', 'fa-trash-can');
-        }
-
-        function updateStats() {
-            let totalPolys = 0;
-            objectsMap.forEach(mesh => {
-                const geometry = mesh.geometry;
-                if (!geometry || !geometry.attributes.position) return;
-                totalPolys += geometry.index
-                    ? geometry.index.count / 3
-                    : geometry.attributes.position.count / 3;
-            });
-            document.getElementById('objCount').innerText = objectsMap.size;
-            document.getElementById('polyCount').innerText = Math.round(totalPolys);
-        }
-
-        function resetCamera() {
-            camera.position.set(8, 6, 10);
-            controls.target.set(0, 0, 0);
-            controls.update();
-        }
-
-        function toggleGrid() {
-            gridHelper.visible = !gridHelper.visible;
-        }
-
-        function toggleWireframe() {
-            isWireframe = !isWireframe;
-            objectsMap.forEach(mesh => {
-                const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
-                materials.forEach(material => {
-                    if (material) material.wireframe = isWireframe;
-                });
-            });
-        }
-
-        // ------------------------------------------------------------
-        // Shared diffuse texture atlas for the complete model
-        // ------------------------------------------------------------
-        function createSharedColorAtlas(meshes) {
-            const tileSize = 256;
-            const columns = Math.ceil(Math.sqrt(meshes.length));
-            const rows = Math.ceil(meshes.length / columns);
-            const canvas = document.createElement('canvas');
-            canvas.width = columns * tileSize;
-            canvas.height = rows * tileSize;
-
-            const context = canvas.getContext('2d');
-            if (!context) throw new Error('Could not create the texture atlas canvas.');
-
-            context.fillStyle = '#ffffff';
-            context.fillRect(0, 0, canvas.width, canvas.height);
-
-            const cells = [];
-            meshes.forEach((mesh, index) => {
-                const sourceMaterial = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
-                const color = sourceMaterial && sourceMaterial.color
-                    ? '#' + sourceMaterial.color.getHexString()
-                    : '#ffffff';
-
-                const column = index % columns;
-                const row = Math.floor(index / columns);
-                const x = column * tileSize;
-                const y = row * tileSize;
-
-                // Each tile stores one object's diffuse/base color.
-                context.fillStyle = color;
-                context.fillRect(x, y, tileSize, tileSize);
-                cells.push({ column, row });
-            });
-
-            return { canvas, columns, rows, tileSize, cells };
-        }
-
-        function remapGeometryUvsToAtlas(geometry, cell, atlas, objectName) {
-            const uv = geometry.getAttribute('uv');
-            if (!uv) {
-                throw new Error(`Object "${objectName}" has no UV coordinates, so it cannot use the shared atlas.`);
-            }
-
-            const uMin = cell.column / atlas.columns;
-            const uMax = (cell.column + 1) / atlas.columns;
-            // Canvas rows start at the top; FBX UV V coordinates start at the bottom.
-            const rowFromBottom = atlas.rows - 1 - cell.row;
-            const vMin = rowFromBottom / atlas.rows;
-            const vMax = (rowFromBottom + 1) / atlas.rows;
-
-            for (let i = 0; i < uv.count; i++) {
-                const u = Math.max(0, Math.min(1, uv.getX(i)));
-                const v = Math.max(0, Math.min(1, uv.getY(i)));
-                uv.setXY(
-                    i,
-                    uMin + u * (uMax - uMin),
-                    vMin + v * (vMax - vMin)
-                );
-            }
-            uv.needsUpdate = true;
-        }
-
-        function createExternalAtlasTexture(atlas) {
-            // Intentionally use an image placeholder containing dimensions only.
-            // It prevents the FBX exporter from adding PNG bytes to the FBX.
-            // The real PNG is written separately as model_texture.png.
-            const texture = new THREE.Texture({
-                width: atlas.canvas.width,
-                height: atlas.canvas.height
-            });
-            texture.name = 'model_texture';
-            texture.fileName = 'model_texture.png';
-            texture.relativeFileName = 'model_texture.png';
-            texture.width = atlas.canvas.width;
-            texture.height = atlas.canvas.height;
-            texture.flipY = false;
-            texture.wrapS = THREE.ClampToEdgeWrapping;
-            texture.wrapT = THREE.ClampToEdgeWrapping;
-            texture.userData = {
-                fileName: 'model_texture.png',
-                relativeFileName: 'model_texture.png',
-                width: atlas.canvas.width,
-                height: atlas.canvas.height
-            };
-            return texture;
-        }
-
-        function cloneMaterialForAtlas(sourceMaterial, atlasTexture) {
-            const material = sourceMaterial
-                ? sourceMaterial.clone()
-                : new THREE.MeshStandardMaterial();
-
-            // The source color has been baked into the PNG atlas.
-            if (material.color) material.color.set(0xffffff);
-            material.map = atlasTexture;
-            material.wireframe = false;
-            material.needsUpdate = true;
-            return material;
-        }
-
-        function buildFbxExportGroup(meshes, atlas, atlasTexture) {
-            const exportGroup = new THREE.Group();
-            exportGroup.name = 'ExportedModel';
-
-            meshes.forEach((sourceMesh, index) => {
-                const clone = sourceMesh.clone(false);
-                clone.name = sourceMesh.name || `Object_${index + 1}`;
-                clone.geometry = sourceMesh.geometry.clone();
-                remapGeometryUvsToAtlas(
-                    clone.geometry,
-                    atlas.cells[index],
-                    atlas,
-                    clone.name
-                );
-
-                if (Array.isArray(sourceMesh.material)) {
-                    clone.material = sourceMesh.material.map(material =>
-                        cloneMaterialForAtlas(material, atlasTexture)
-                    );
-                } else {
-                    clone.material = cloneMaterialForAtlas(sourceMesh.material, atlasTexture);
-                }
-
-                exportGroup.add(clone);
-            });
-
-            exportGroup.updateMatrixWorld(true);
-            return exportGroup;
-        }
-
-        function disposeExportGroup(exportGroup, atlasTexture) {
-            exportGroup.traverse(object => {
-                if (object.geometry) object.geometry.dispose();
-                if (Array.isArray(object.material)) {
-                    object.material.forEach(material => material && material.dispose());
-                } else if (object.material) {
-                    object.material.dispose();
-                }
-            });
-            atlasTexture.dispose();
-        }
-
-        function canvasToPngBlob(canvas) {
-            return new Promise((resolve, reject) => {
-                canvas.toBlob(blob => {
-                    if (blob) resolve(blob);
-                    else reject(new Error('The browser could not create the PNG texture.'));
-                }, 'image/png');
-            });
-        }
-
-        // ------------------------------------------------------------
-        // Export FBX + one external PNG texture in the same ZIP folder
-        // ------------------------------------------------------------
-        async function exportFbxWithTextures() {
-            if (objectsMap.size === 0) {
-                showToast('Canvas is empty! Add models before exporting.', 'fa-triangle-exclamation', 'bg-amber-600');
-                return;
-            }
-
-            if (typeof window.exportFbxScene !== 'function') {
-                const message = window.fbxExporterLoadError
-                    ? 'FBX exporter failed to load. Check your internet connection.'
-                    : 'FBX exporter is still loading. Try again in a moment.';
-                showToast(message, 'fa-triangle-exclamation', 'bg-amber-600');
-                return;
-            }
-
-            if (typeof JSZip === 'undefined') {
-                showToast('ZIP library has not loaded.', 'fa-triangle-exclamation', 'bg-amber-600');
-                return;
-            }
-
-            let exportGroup = null;
-            let atlasTexture = null;
-
-            try {
-                showToast('Building one shared texture atlas and FBX...', 'fa-spinner', 'bg-indigo-600');
-
-                const meshes = Array.from(objectsMap.values());
-                const atlas = createSharedColorAtlas(meshes);
-                atlasTexture = createExternalAtlasTexture(atlas);
-                exportGroup = buildFbxExportGroup(meshes, atlas, atlasTexture);
-
-                const warnings = [];
-                const fbxBytes = window.exportFbxScene(exportGroup, {
-                    format: 'binary',
-                    target: 'threejs',
-                    embedTextures: false,
-                    warnings,
-                    onWarning: warning => console.warn('FBX export warning:', warning)
-                });
-
-                if (!(fbxBytes instanceof Uint8Array) && !(fbxBytes instanceof ArrayBuffer)) {
-                    throw new Error('The FBX exporter returned an unexpected result.');
-                }
-
-                const textureBlob = await canvasToPngBlob(atlas.canvas);
-                const zip = new JSZip();
-
-                // Both files are written at the ZIP root, beside one another.
-                zip.file('model.fbx', fbxBytes);
-                zip.file('model_texture.png', textureBlob);
-
-                const zipBlob = await zip.generateAsync({
-                    type: 'blob',
-                    compression: 'DEFLATE',
-                    compressionOptions: { level: 6 }
-                });
-
-                const downloadUrl = URL.createObjectURL(zipBlob);
-                const link = document.createElement('a');
-                link.href = downloadUrl;
-                link.download = '3d_model_package.zip';
-                document.body.appendChild(link);
-                link.click();
-                link.remove();
-
-                setTimeout(() => URL.revokeObjectURL(downloadUrl), 1500);
-
-                if (warnings.length) {
-                    console.warn('FBX exporter warnings:', warnings);
-                }
-
-                showToast('FBX + one external texture exported!', 'fa-circle-check', 'bg-emerald-600');
-            } catch (error) {
-                console.error('FBX export failed:', error);
-                showToast('FBX export failed: ' + error.message, 'fa-circle-xmark', 'bg-red-600');
-            } finally {
-                if (exportGroup && atlasTexture) {
-                    disposeExportGroup(exportGroup, atlasTexture);
-                } else if (atlasTexture) {
-                    atlasTexture.dispose();
-                }
-            }
-        }
-
-        // ------------------------------------------------------------
-        // Toast notification
-        // ------------------------------------------------------------
-        function showToast(message, icon = 'fa-circle-info', bgClass = 'bg-indigo-600') {
-            const toast = document.getElementById('toast');
-            document.getElementById('toastMsg').innerText = message;
-            document.getElementById('toastIcon').className = `fa-solid ${icon}`;
-            toast.className = `absolute top-4 left-4 ${bgClass} text-white text-xs px-3.5 py-2 rounded-lg backdrop-blur shadow-xl transition-all duration-300 opacity-100 transform translate-y-0 z-20 flex items-center space-x-2`;
-
-            clearTimeout(showToast.hideTimer);
-            showToast.hideTimer = setTimeout(() => {
-                toast.classList.remove('opacity-100', 'translate-y-0');
-                toast.classList.add('opacity-0', '-translate-y-2', 'pointer-events-none');
-            }, 3000);
-        }
-    </script>
+        rows.push(ring);
+      }
+      return finish(gridData(rows, true, !cmd.closed, !cmd.closed), cmd, true);
+    }
+    case 'extrude': {
+      if (!Array.isArray(cmd.shape) || cmd.shape.length < 3) throw new Error('extrude needs a "shape".');
+      const shape = new THREE.Shape(cmd.shape.map(p => new THREE.Vector2(p[0], p[1])));
+      (cmd.holes || []).forEach(h => shape.holes.push(new THREE.Path(h.map(p => new THREE.Vector2(p[0], p[1])))));
+      const b = cmd.bevel || 0, depth = cmd.depth ?? 0.2;
+      const g = new THREE.ExtrudeGeometry(shape, { depth, bevelEnabled: b > 0, bevelSize: b, bevelThickness: b, bevelSegments: 3, curveSegments: cmd.curve || 12 });
+      g.translate(0, 0, -depth / 2);
+      return g;
+    }
+    case 'box': case 'cube': { const s = cmd.size || [1,1,1]; return new THREE.BoxGeometry(s[0], s[1], s[2]); }
+    case 'sphere': return new THREE.SphereGeometry(cmd.rad || cmd.radius || 0.5, 48, 32);
+    case 'cylinder': return new THREE.CylinderGeometry(cmd.radTop ?? cmd.rad ?? 0.5, cmd.radBot ?? cmd.rad ?? 0.5, cmd.h || 1, cmd.seg || 32);
+    case 'cone': return new THREE.ConeGeometry(cmd.rad || 0.5, cmd.h || 1, cmd.seg || 32);
+    case 'torus': return new THREE.TorusGeometry(cmd.rad || 0.5, cmd.tube || 0.15, 24, 100);
+    case 'torusknot': case 'torus_knot': return new THREE.TorusKnotGeometry(cmd.rad || 0.5, cmd.tube || 0.15, 160, 32);
+    case 'dodecahedron': return new THREE.DodecahedronGeometry(cmd.rad || 0.5);
+    case 'icosahedron': return new THREE.IcosahedronGeometry(cmd.rad || 0.5);
+    case 'octahedron': return new THREE.OctahedronGeometry(cmd.rad || 0.5);
+    case 'tetrahedron': return new THREE.TetrahedronGeometry(cmd.rad || 0.5);
+    case 'ring': return new THREE.RingGeometry(cmd.radInner || 0.2, cmd.radOuter || 0.5, 48);
+    case 'plane': { const s = cmd.size || [1,1]; return new THREE.PlaneGeometry(s[0], s[1]); }
+    case 'capsule': {
+      const r = cmd.rad || 0.25, hb = (cmd.h || 0.5) / 2, pts = [];
+      for (let i = 0; i <= 8; i++) { const a = -Math.PI/2 + Math.PI/2*i/8; pts.push(new THREE.Vector2(r*Math.cos(a), -hb + r*Math.sin(a))); }
+      for (let i = 0; i <= 8; i++) { const a = Math.PI/2*i/8; pts.push(new THREE.Vector2(r*Math.cos(a), hb + r*Math.sin(a))); }
+      return new THREE.LatheGeometry(pts, cmd.seg || 24);
+    }
+    default: throw new Error('Unknown type "' + cmd.type + '".');
+  }
+}
+
+function buildMesh(cmd, mirrorAxis) {
+  cmd = { ...(MATS[cmd.mat] || {}), ...cmd };
+  const geometry = buildGeometry(cmd);
+  const opacity = cmd.opac ?? cmd.opacity ?? 1, trans = cmd.trans ?? 0;
+  const mat = new THREE.MeshPhysicalMaterial({
+    color: new THREE.Color(cmd.c || cmd.col || cmd.color || '#818cf8'),
+    roughness: cmd.rough ?? 0.4, metalness: cmd.metal ?? 0.2, transmission: trans,
+    transparent: trans > 0 || opacity < 1, opacity, wireframe: !!cmd.wire || isWireframe, side: THREE.DoubleSide
+  });
+  if (cmd.emiss || cmd.emissive) { mat.emissive = new THREE.Color(cmd.emiss || cmd.emissive); mat.emissiveIntensity = cmd.emissInt ?? 1; }
+  const mesh = new THREE.Mesh(geometry, mat);
+  const p = cmd.p || cmd.pos || [0,0,0], r = cmd.r || cmd.rot || [0,0,0], s = cmd.s || cmd.scale || [1,1,1];
+  let P = [p[0]||0, p[1]||0, p[2]||0], R = [r[0]||0, r[1]||0, r[2]||0], S = [s[0] ?? 1, s[1] ?? 1, s[2] ?? 1];
+  if (mirrorAxis) {
+    const k = { x: 0, y: 1, z: 2 }[mirrorAxis];
+    if (k === undefined) throw new Error('mirror must be "x", "y" or "z".');
+    P[k] = -P[k]; S[k] = -S[k];
+    [0,1,2].filter(i => i !== k).forEach(i => R[i] = -R[i]);
+  }
+  mesh.position.set(...P); mesh.rotation.set(...R); mesh.scale.set(...S);
+  mesh.castShadow = mesh.receiveShadow = true;
+  return mesh;
+}
+
+/* ---------------- Commands ---------------- */
+function removeKey(key) {
+  const m = objectsMap.get(key);
+  if (!m) return;
+  scene.remove(m); m.geometry.dispose(); m.material.dispose(); objectsMap.delete(key);
+}
+
+function processCommand(cmd) {
+  const op = String(cmd.op || 'add').toLowerCase();
+  const id = cmd.id || ('obj_' + Math.random().toString(36).slice(2, 10));
+  if (op === 'clear') { clearScene(true); return true; }
+  if (op === 'delete') { const had = groups.has(id); removeId(id); return had; }
+  removeId(id);
+  const list = instances(cmd), keys = [];
+  list.forEach((m, i) => { const key = i ? id + '#' + i : id; m.name = key; m.userData = { ...cmd, type: cmd.type || 'box' }; scene.add(m); objectsMap.set(key, m); keys.push(key); });
+  groups.set(id, keys);
+  return true;
+}
+
+function parseAndExecute() {
+  const input = document.getElementById('aiJsonInput').value.trim();
+  if (!input) return showToast('Paste AI JSON first!', 'fa-triangle-exclamation', 'bg-amber-600');
+  let cmds;
+  try {
+    let raw = input.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '').trim();
+    const a = raw.indexOf('['), b = raw.lastIndexOf(']');
+    if (a !== -1 && b > a) raw = raw.slice(a, b + 1);
+    raw = raw.replace(/,\s*([\]}])/g, '$1');
+    cmds = JSON.parse(raw);
+    if (!Array.isArray(cmds)) throw new Error('Input must be a JSON array.');
+  } catch (e) { return showToast('JSON error: ' + e.message, 'fa-circle-xmark', 'bg-red-600'); }
+  let ok = 0; const errors = []; lastErrors = errors;
+  cmds.forEach((c, i) => {
+    if (!c || typeof c !== 'object') return;
+    try { if (processCommand(c)) ok++; } catch (e) { errors.push(`#${i} ${c.id || c.type || ''}: ${e.message}`); }
+  });
+  updateStats(); fitCamera();
+  if (errors.length) { console.warn(errors); showToast(`${ok} built, ${errors.length} failed: ${errors[0]}`, 'fa-triangle-exclamation', 'bg-amber-600'); }
+  else showToast(`Built ${ok} objects`);
+}
+
+/* ---------------- Viewport ---------------- */
+function onCanvasClick(e) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  mouse.set(((e.clientX - rect.left)/rect.width)*2 - 1, -((e.clientY - rect.top)/rect.height)*2 + 1);
+  raycaster.setFromCamera(mouse, camera);
+  const hit = raycaster.intersectObjects([...objectsMap.values()], false)[0];
+  if (!hit) return;
+  const o = hit.object, col = o.userData.c || o.userData.col || o.userData.color || '#818cf8';
+  document.getElementById('inspectName').innerText = `${o.userData.type} (${o.name})`;
+  document.getElementById('inspectDetails').innerText = `Pos [${o.position.x.toFixed(2)}, ${o.position.y.toFixed(2)}, ${o.position.z.toFixed(2)}] | ${col}`;
+  document.getElementById('inspectColorBadge').style.backgroundColor = col;
+  document.getElementById('inspectorBanner').classList.remove('hidden');
+}
+function hideInspector() { document.getElementById('inspectorBanner').classList.add('hidden'); }
+
+function clearScene(silent) {
+  [...objectsMap.keys()].forEach(removeKey); groups.clear();
+  hideInspector(); updateStats();
+  if (silent !== true) showToast('Canvas cleared', 'fa-trash-can');
+}
+
+function updateStats() {
+  let tris = 0;
+  objectsMap.forEach(m => { const g = m.geometry; tris += g.index ? g.index.count / 3 : g.attributes.position.count / 3; });
+  document.getElementById('objCount').innerText = objectsMap.size;
+  document.getElementById('polyCount').innerText = Math.round(tris);
+}
+
+function fitCamera() {
+  if (!objectsMap.size) { camera.position.set(8, 6, 10); controls.target.set(0, 0, 0); return controls.update(); }
+  const box = new THREE.Box3();
+  objectsMap.forEach(m => box.expandByObject(m));
+  const size = box.getSize(new THREE.Vector3()), ctr = box.getCenter(new THREE.Vector3());
+  const dist = Math.max(size.x, size.y, size.z, 1) * 1.9;
+  controls.target.copy(ctr);
+  camera.position.set(ctr.x + dist*0.7, ctr.y + dist*0.5, ctr.z + dist*0.9);
+  controls.update();
+}
+function toggleGrid() { gridHelper.visible = !gridHelper.visible; }
+function toggleWireframe() { isWireframe = !isWireframe; objectsMap.forEach(m => m.material.wireframe = isWireframe); }
+
+/* ---------------- FBX export (shared atlas + external PNG) ---------------- */
+function buildAtlas(meshes) {
+  const tile = 16, cols = Math.ceil(Math.sqrt(meshes.length)), rows = Math.ceil(meshes.length / cols);
+  const canvas = document.createElement('canvas'); canvas.width = cols * tile; canvas.height = rows * tile;
+  const ctx = canvas.getContext('2d');
+  meshes.forEach((m, i) => { ctx.fillStyle = '#' + m.material.color.getHexString(); ctx.fillRect((i % cols)*tile, Math.floor(i / cols)*tile, tile, tile); });
+  return { canvas, cols, rows };
+}
+
+async function exportFbxWithTextures() {
+  if (!objectsMap.size) return showToast('Canvas is empty!', 'fa-triangle-exclamation', 'bg-amber-600');
+  if (typeof window.exportFbxScene !== 'function') return showToast(window.fbxExporterLoadError ? 'FBX exporter failed to load.' : 'FBX exporter still loading.', 'fa-triangle-exclamation', 'bg-amber-600');
+  const meshes = [...objectsMap.values()], atlas = buildAtlas(meshes), group = new THREE.Group();
+  const tex = new THREE.Texture({ width: atlas.canvas.width, height: atlas.canvas.height });
+  Object.assign(tex, { name: 'model_texture', fileName: 'model_texture.png', relativeFileName: 'model_texture.png', flipY: false });
+  tex.userData = { fileName: 'model_texture.png', relativeFileName: 'model_texture.png', width: tex.image.width, height: tex.image.height };
+  try {
+    showToast('Building FBX...', 'fa-spinner');
+    meshes.forEach((src, i) => {
+      const c = src.clone(false); c.geometry = src.geometry.clone();
+      // Each object's UVs collapse to the centre of its own solid-colour atlas tile.
+      const u = (i % atlas.cols + 0.5) / atlas.cols, v = (atlas.rows - 1 - Math.floor(i / atlas.cols) + 0.5) / atlas.rows;
+      const n = c.geometry.attributes.position.count, uv = new Float32Array(n * 2);
+      for (let k = 0; k < n; k++) { uv[k*2] = u; uv[k*2+1] = v; }
+      c.geometry.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2));
+      c.material = src.material.clone(); c.material.color.set(0xffffff); c.material.map = tex; c.material.wireframe = false;
+      group.add(c);
+    });
+    group.updateMatrixWorld(true);
+    const fbx = window.exportFbxScene(group, { format: 'binary', target: 'threejs', embedTextures: false, warnings: [], onWarning: w => console.warn(w) });
+    const png = await new Promise((res, rej) => atlas.canvas.toBlob(b => b ? res(b) : rej(new Error('PNG failed')), 'image/png'));
+    const zip = new JSZip(); zip.file('model.fbx', fbx); zip.file('model_texture.png', png);
+    const url = URL.createObjectURL(await zip.generateAsync({ type: 'blob', compression: 'DEFLATE' }));
+    const a = document.createElement('a'); a.href = url; a.download = '3d_model_package.zip';
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 1500);
+    showToast('FBX + texture exported!', 'fa-circle-check', 'bg-emerald-600');
+  } catch (e) { console.error(e); showToast('Export failed: ' + e.message, 'fa-circle-xmark', 'bg-red-600'); }
+  finally { group.traverse(o => { if (o.geometry) o.geometry.dispose(); if (o.material) o.material.dispose(); }); tex.dispose(); }
+}
+
+function showToast(msg, icon = 'fa-circle-check', bg = 'bg-indigo-600') {
+  const t = document.getElementById('toast');
+  document.getElementById('toastMsg').innerText = msg;
+  document.getElementById('toastIcon').className = 'fa-solid ' + icon;
+  t.className = `absolute top-4 left-4 ${bg} text-white text-xs px-3.5 py-2 rounded-lg shadow-xl transition-all duration-300 opacity-100 pointer-events-none z-20 flex items-center space-x-2 max-w-md`;
+  clearTimeout(showToast.h);
+  showToast.h = setTimeout(() => { t.classList.remove('opacity-100'); t.classList.add('opacity-0'); }, 4000);
+}
+</script>
 </body>
 </html>
