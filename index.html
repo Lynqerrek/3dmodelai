@@ -80,6 +80,9 @@ OUTPUT: ONLY a valid JSON array of commands. No prose, no Markdown fences. World
 COMMON FIELDS (any command): "id" (unique name; re-using an id replaces it), "p" [x,y,z] position, "r" [rx,ry,rz] radians, "s" [sx,sy,sz] scale, "mirror": "x" | "y" | "z" (auto-creates a reflected copy about the world plane through the origin; model one half of symmetric things like wings, legs, faces, hulls).
 MATERIAL: "c" hex colour, "rough" 0-1, "metal" 0-1, "trans" 0-1 (glass), "opac" 0-1, "emiss" hex, "emissInt" number, "wire" bool.
 PRESETS: "mat": "gold"|"steel"|"chrome"|"copper"|"glass"|"rubber"|"stone"|"wood"|"skin"|"plastic"|"neon" sets colour+material; any explicit field (e.g. "c") overrides it.
+GROUPS & ANCHORS (the engine does the position maths so you do not have to; prefer these over typing absolute coordinates, they are the best way to avoid gaps and floating parts):
+- {"type":"group","id":"arm","p":[..],"r":[..],"s":[..]} makes an empty pivot. Any later command with "parent":"arm" is placed in that group's local space and moves, rotates and scales with it. Groups accept mirror/repeat/radial and the children are created for every copy, so build ONE arm/leg/wing/wheel inside a group and mirror or repeat the group. Nest groups for joints (shoulder > elbow > hand) and rotate a joint group to pose it. Define a group before its children. Re-sending a group id deletes its children, so re-send them too.
+- "on":"targetId" with "at":"top"|"bottom"|"front"|"back"|"left"|"right"|"center" (or [fx,fy,fz] = fractions of the target's bounding box, e.g. [0.5,1,0.5] is top centre) places the object on that point of an EARLIER object; "p" then becomes an offset from the anchor. Use for eyes on a head, a hat on a head, a handle on a door, a rider on a horse. Axes: +x right, +y up, +z front. Anchors use the target's bounding box at the moment of the command.
 REPEAT: "repeat": {"n":8,"offset":[dx,dy,dz],"rot":[rx,ry,rz],"scale":[sx,sy,sz]} makes n copies, each step adding offset/rotation and multiplying scale (teeth, scales, windows, ribs, stairs). "radial": {"n":6,"axis":"y"} spins n copies around a world axis through the origin (petals, spokes, turbine blades, legs). Repeat and radial combine, and mirror applies afterwards. Max 500 copies per command.
 SHADING: "smooth": true/false (smooth normals vs faceted). Defaults: true for loft/tube/lathe/surface, false for mesh (crisp faces).
 SUBDIVISION: "subdiv": 1-3 applies Loop subdivision, turning a coarse low-poly "mesh" cage into a smooth organic surface (share vertices between faces so it stays watertight). Ideal for creatures, heads, rocks, pillows, cartoon forms.
@@ -93,7 +96,7 @@ CUSTOM GEOMETRY TYPES
 5. "extrude": "shape": [[x,y],...] outline (counter-clockwise), optional "holes": [[[x,y],...],...], "depth": thickness, "bevel": bevel size (0 = sharp), "curve": curve detail. Lies in the XY plane, centred on z. Gears, signs, swords, wings, plates, letters, silhouettes.
 6. "surface": parametric grid. "grid": rows of points, each row same length: [[[x,y,z],...],...]; "closeU": true wraps each row. Sails, cloth, terrain, capes, petals, fins, canopy membranes.
 
-PRIMITIVES still exist for quick use: box (size [w,h,d]), sphere (rad), cylinder (radTop,radBot,h,seg), cone (rad,h), torus/torusKnot (rad,tube), capsule (rad,h), ring (radInner,radOuter), plane (size), dodecahedron/icosahedron/octahedron/tetrahedron (rad). Prefer custom geometry whenever shape matters.
+PRIMITIVES (available, but use them sparingly): at least roughly 80% of the visible form of any model should come from custom geometry (mesh, loft, tube, lathe, extrude, surface, subdiv). Primitives are only for small simple supporting parts where a basic shape is genuinely correct: a tiny sphere for an eye or bolt head, a thin cylinder for a pin or axle, a flat box for a simple base or hidden filler, a torus ring for a basic hoop. NEVER build the main body, head, limbs, wings, hull, roof, silhouette-defining parts or hero features from primitives, and never assemble a "blocky" model out of boxes and spheres. If you catch yourself reaching for a box or sphere for a major part, replace it with a loft, tube, lathe or mesh shaped to the real form. Available primitives: box (size [w,h,d]), sphere (rad), cylinder (radTop,radBot,h,seg), cone (rad,h), torus/torusKnot (rad,tube), capsule (rad,h), ring (radInner,radOuter), plane (size), dodecahedron/icosahedron/octahedron/tetrahedron (rad). Whenever shape matters, use custom geometry.
 
 EXAMPLES
 Vase: {"type":"lathe","id":"vase","profile":[[0,0],[0.5,0],[0.7,0.4],[0.35,1.1],[0.3,1.5],[0.45,1.8]],"c":"#38bdf8","metal":0.3,"rough":0.2}
@@ -101,15 +104,18 @@ Tail: {"type":"tube","id":"tail","path":[[0,1,0],[0,1.2,-1],[0.3,1.8,-2],[0,2.6,
 Fish body: {"type":"loft","id":"body","rings":[[[0,0,-1],[0,0,-1],[0,0,-1],[0,0,-1]],[[0.4,1,0],[0,1.5,0],[-0.4,1,0],[0,0.5,0]],[[0,1,1],[0,1,1],[0,1,1],[0,1,1]]],"c":"#fb923c"}
 Fish body (sections): {"type":"loft","id":"body","axis":"z","n":16,"sections":[{"p":[0,1,-1.6],"rx":0,"ry":0},{"p":[0,1,-0.8],"rx":0.45,"ry":0.55},{"p":[0,1,0.4],"rx":0.35,"ry":0.45},{"p":[0,1,1.6],"rx":0.05,"ry":0.2}],"mat":"plastic","c":"#fb923c"}
 Spokes: {"type":"box","id":"spoke","size":[0.1,0.1,1],"p":[0,1,0.6],"radial":{"n":8,"axis":"y"},"mat":"steel"}
+Mirrored arm with hand: {"type":"group","id":"arm","p":[0.9,2.4,0],"mirror":"x"} then {"type":"tube","id":"upper","parent":"arm","path":[[0,0,0],[0,-0.7,0]],"rad":0.15,"mat":"skin"} then {"type":"sphere","id":"hand","parent":"arm","on":"upper","at":"bottom","rad":0.18,"mat":"skin"}
 Fin (mirrored): {"type":"mesh","id":"fin","verts":[[0.4,1,0],[1.6,1.4,-0.3],[1.2,0.5,-0.8],[0.4,0.9,-0.6]],"faces":[[0,1,2,3]],"mirror":"x","c":"#fdba74","smooth":false}
 
 RESEARCH & QUALITY PROCESS (mandatory, do all of it BEFORE writing the final JSON; use your reasoning/thinking space, and web search if you have it):
 A. RESEARCH FIRST. Study the subject properly. Recall or look up real references: how professional artists and well-made 3D models of this subject are constructed, real-world proportions and measurements, anatomy or mechanical structure, characteristic silhouette, materials, colours and surface details. List the 5-10 features that make this subject instantly recognisable and make sure every one is modelled.
 B. TAKE YOUR TIME. Do not rush to the first workable answer. Plan the full parts list (primary masses, secondary forms, tertiary detail, accents) with approximate coordinates and sizes before you write any vertices. Quality and completeness matter far more than speed or brevity. A finished model normally has dozens of objects, often many more.
-C. BUILD. Use the right tool for each part (loft/tube/lathe/mesh/subdiv/extrude/surface), custom geometry wherever shape matters, repeat/radial/mirror for patterns and symmetry.
-D. AUDIT EVERY PART when finished, one object at a time, and fix what you find: Is it the right size relative to the whole? Is it positioned correctly and actually attached (no gaps, no floating pieces, no unintended intersections)? Is the silhouette correct from the front, side, top and 3/4 view? Is any part missing, duplicated, flipped, mirrored the wrong way, upside down or facing the wrong direction? Are index numbers, ring counts and arrays valid? Does the colour and material fit the real subject, with contrast and variation? Is there enough small detail (edges, seams, panels, spikes, fasteners, texture via displace)? Is the model sitting on the ground with min y near 0?
-E. IMPROVE. Replace any weak, blocky or generic part with a better one, add missing detail, then audit again. Repeat until you cannot find any further improvement.
-F. DELIVER. Only after A-E, output the final corrected JSON array and nothing else (all research, planning and analysis stays in your reasoning, never in the output).
+C. BUILD. Default to custom geometry for everything that defines the model; primitives are the exception, not the starting point. Use the right tool for each part (loft/tube/lathe/mesh/subdiv/extrude/surface), custom geometry wherever shape matters, repeat/radial/mirror for patterns and symmetry.
+D. AUDIT EVERY PART when finished, one object at a time, and fix what you find: Is it the right size relative to the whole? Is it positioned correctly and actually attached (no gaps, no floating pieces, no unintended intersections)? Is the silhouette correct from the front, side, top and 3/4 view? Is any part missing, duplicated, flipped, mirrored the wrong way, upside down or facing the wrong direction? Are index numbers, ring counts and arrays valid? Are any major parts still plain primitives (box/sphere/cylinder/cone)? If so, rebuild them as custom geometry. Does the colour and material fit the real subject, with contrast and variation? Is there enough small detail (edges, seams, panels, spikes, fasteners, texture via displace)? Is the model sitting on the ground with min y near 0?
+E. REDO AND FIX EVERYTHING. After the first full build, treat it as a DRAFT, never the answer. Write down every flaw the audit found (wrong proportions, gaps, floating or intersecting parts, flat or generic shapes, missing detail, dull materials, invalid data), then rebuild the whole model with ALL of those fixes applied, rewriting weak parts from scratch instead of patching around them. Then run the audit again on the new version and repeat. Do a minimum of THREE complete build-audit-fix passes, and keep going until a careful audit of every single part finds nothing left to improve. Do not stop at "good enough".
+
+NO RUSHING: never produce your first idea as the final answer. Do not skip, shorten or summarise any step above, do not cut the part list short, and do not settle for a simple version because it is quicker. Spend as much time and reasoning as the model needs, and do the audit honestly and critically, as if you were reviewing someone else's work and trying to find faults. If you are unsure whether a part is right, check it again and fix it.
+F. DELIVER. Only after A-E are fully complete (all passes done, final audit clean), output the final corrected JSON array and nothing else (all research, planning and analysis stays in your reasoning, never in the output).
 
 WORKFLOW: 1) Plan major forms, proportions and silhouette. 2) Build large forms with loft/tube/lathe. 3) Add hand-built mesh details (plates, fins, spikes, edges). 4) Add small accents and emissive parts. 5) Review coordinates mentally for gaps, floating or intersecting parts, flipped proportions, and fix them before answering. 6) Use material contrast and colour variation. Be bold, detailed and original. Ring/row point counts may differ (the engine resamples), but keep them consistent when you can. If the user pastes a SCENE REPORT, treat it as feedback: fix floating or disconnected parts, wrong sizes and listed errors, then return the FULL corrected JSON array. Output ONLY the JSON array.
 
@@ -227,7 +233,7 @@ const MATS = {
   neon: { c: '#22d3ee', emiss: '#22d3ee', emissInt: 2, rough: 0.3, metal: 0 }
 };
 let lastErrors = [];
-const groups = new Map();
+const groups = new Map(), nodeMap = new Map();
 
 function resample(r, N, closed) {
   const L = r.length, out = [];
@@ -299,8 +305,10 @@ function mirrorMesh(m, axis) {
   return c;
 }
 
-function instances(cmd) {
-  const base = buildMesh(cmd); let list = [base];
+function instances(cmd, par) {
+  const base = buildMesh(cmd);
+  if (cmd.on) { const pt = anchorPoint(cmd, par), o = cmd.p || cmd.pos || [0,0,0]; base.position.set(pt.x + (o[0] || 0), pt.y + (o[1] || 0), pt.z + (o[2] || 0)); }
+  let list = [base];
   const rp = cmd.repeat, rd = cmd.radial;
   if (rp) {
     const n = Math.min(rp.n || 1, 500), o = rp.offset || [0,0,0], r = rp.rot || [0,0,0], sc = rp.scale || [1,1,1];
@@ -321,6 +329,18 @@ function instances(cmd) {
   }
   if (cmd.mirror) list = list.concat(list.map(m => mirrorMesh(m, String(cmd.mirror).toLowerCase())));
   return list;
+}
+
+function anchorPoint(cmd, par) {
+  const keys = groups.get(cmd.on), t = keys && (objectsMap.get(keys[0]) || nodeMap.get(keys[0]));
+  if (!t) throw new Error('"on" target "' + cmd.on + '" not found (define it first).');
+  scene.updateMatrixWorld(true);
+  const b = new THREE.Box3().setFromObject(t);
+  const A = { top: [.5,1,.5], bottom: [.5,0,.5], front: [.5,.5,1], back: [.5,.5,0], left: [0,.5,.5], right: [1,.5,.5], center: [.5,.5,.5] };
+  const f = Array.isArray(cmd.at) ? cmd.at : (A[cmd.at || 'center'] || A.center);
+  const pt = new THREE.Vector3(b.min.x + (b.max.x - b.min.x) * f[0], b.min.y + (b.max.y - b.min.y) * f[1], b.min.z + (b.max.z - b.min.z) * f[2]);
+  if (par) par.worldToLocal(pt);
+  return pt;
 }
 
 function removeId(id) { (groups.get(id) || []).forEach(removeKey); groups.delete(id); }
@@ -448,6 +468,11 @@ function buildGeometry(cmd) {
 
 function buildMesh(cmd, mirrorAxis) {
   cmd = { ...(MATS[cmd.mat] || {}), ...cmd };
+  if (String(cmd.type).toLowerCase() === 'group') {
+    const g = new THREE.Group(), p = cmd.p || cmd.pos || [0,0,0], r = cmd.r || cmd.rot || [0,0,0], sc = cmd.s || cmd.scale || [1,1,1];
+    g.position.set(p[0] || 0, p[1] || 0, p[2] || 0); g.rotation.set(r[0] || 0, r[1] || 0, r[2] || 0); g.scale.set(sc[0] ?? 1, sc[1] ?? 1, sc[2] ?? 1);
+    return g;
+  }
   const geometry = buildGeometry(cmd);
   const opacity = cmd.opac ?? cmd.opacity ?? 1, trans = cmd.trans ?? 0;
   const mat = new THREE.MeshPhysicalMaterial({
@@ -472,9 +497,12 @@ function buildMesh(cmd, mirrorAxis) {
 
 /* ---------------- Commands ---------------- */
 function removeKey(key) {
-  const m = objectsMap.get(key);
-  if (!m) return;
-  scene.remove(m); m.geometry.dispose(); m.material.dispose(); objectsMap.delete(key);
+  const o = nodeMap.get(key) || objectsMap.get(key);
+  if (!o) return;
+  const dead = []; o.traverse(c => dead.push(c));
+  if (o.parent) o.parent.remove(o);
+  objectsMap.forEach((m, k) => { if (dead.includes(m)) { m.geometry.dispose(); m.material.dispose(); objectsMap.delete(k); } });
+  nodeMap.forEach((n, k) => { if (dead.includes(n)) nodeMap.delete(k); });
 }
 
 function processCommand(cmd) {
@@ -483,8 +511,17 @@ function processCommand(cmd) {
   if (op === 'clear') { clearScene(true); return true; }
   if (op === 'delete') { const had = groups.has(id); removeId(id); return had; }
   removeId(id);
-  const list = instances(cmd), keys = [];
-  list.forEach((m, i) => { const key = i ? id + '#' + i : id; m.name = key; m.userData = { ...cmd, type: cmd.type || 'box' }; scene.add(m); objectsMap.set(key, m); keys.push(key); });
+  const isGroup = String(cmd.type).toLowerCase() === 'group', keys = [];
+  let parents = [null];
+  if (cmd.parent) {
+    parents = (groups.get(cmd.parent) || []).map(k => nodeMap.get(k) || objectsMap.get(k)).filter(Boolean);
+    if (!parents.length) throw new Error('parent "' + cmd.parent + '" not found (define it first).');
+  }
+  parents.forEach((par, pi) => instances(cmd, par).forEach((m, i) => {
+    const key = id + (pi ? '@' + pi : '') + (i ? '#' + i : '');
+    m.name = key; m.userData = { ...cmd, type: cmd.type || 'box' };
+    (par || scene).add(m); (isGroup ? nodeMap : objectsMap).set(key, m); keys.push(key);
+  }));
   groups.set(id, keys);
   return true;
 }
@@ -527,7 +564,7 @@ function onCanvasClick(e) {
 function hideInspector() { document.getElementById('inspectorBanner').classList.add('hidden'); }
 
 function clearScene(silent) {
-  [...objectsMap.keys()].forEach(removeKey); groups.clear();
+  [...nodeMap.keys()].forEach(removeKey); [...objectsMap.keys()].forEach(removeKey); groups.clear();
   hideInspector(); updateStats();
   if (silent !== true) showToast('Canvas cleared', 'fa-trash-can');
 }
@@ -572,6 +609,7 @@ async function exportFbxWithTextures() {
     showToast('Building FBX...', 'fa-spinner');
     meshes.forEach((src, i) => {
       const c = src.clone(false); c.geometry = src.geometry.clone();
+      src.updateWorldMatrix(true, false); src.matrixWorld.decompose(c.position, c.quaternion, c.scale);
       // Each object's UVs collapse to the centre of its own solid-colour atlas tile.
       const u = (i % atlas.cols + 0.5) / atlas.cols, v = (atlas.rows - 1 - Math.floor(i / atlas.cols) + 0.5) / atlas.rows;
       const n = c.geometry.attributes.position.count, uv = new Float32Array(n * 2);
